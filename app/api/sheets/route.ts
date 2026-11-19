@@ -115,29 +115,16 @@ export async function POST(request: Request) {
       })
     }
 
-    const requests = template.rows.map((row) => {
-      return {
-        updateCells: {
-          range: {
-            sheetId,
-            startRowIndex: row.rowNumber - 1,
-            endRowIndex: row.rowNumber,
-            startColumnIndex: template.startColumnIndex,
-            endColumnIndex: template.startColumnIndex + template.headers.length,
-          },
-          rows: [{ values: template.headers.map(() => ({ userEnteredValue: { stringValue: '' } })) }],
-          fields: 'userEnteredValue',
-        },
-      }
-    })
-
-    if (requests.length) {
-      await sheets.spreadsheets.batchUpdate({
+    const lastDataRow = template.rows.reduce((last, row) => Math.max(last, row.rowNumber), template.headerRowNumber)
+    if (lastDataRow > template.headerRowNumber) {
+      await sheets.spreadsheets.values.clear({
         spreadsheetId: spreadsheet.file.id,
-        requestBody: { requests },
+        range: `'${year}'!A${template.headerRowNumber + 1}:Z${lastDataRow}`,
       })
     }
 
+    const newYearRows = (await getRentalSpreadsheet()).years.find((item) => item.year === year)?.rows ?? []
+    if (newYearRows.length) throw new Error('CREATED_YEAR_CONTAINS_TEMPLATE_ROWS')
     const createdSpreadsheet = await getRentalSpreadsheet()
     if (!createdSpreadsheet.years.some((item) => item.year === year)) {
       throw new Error('CREATED_YEAR_NOT_FOUND')
