@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getGoogleSheetTables, getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
-import { getRentalCurrencyFormatRequests, getRentalFormulaCells, isCalculatedRentalHeader, toA1Column } from '@/lib/rental-sheet'
+import { getRentalCurrencyFormatRequests, getRentalFormulaCells, isCalculatedRentalHeader, isPaymentStatusHeader, toA1Column } from '@/lib/rental-sheet'
 
 function isCellValueArray(value: unknown): value is Array<string | number | boolean> {
   return Array.isArray(value) && value.every((item) => ['string', 'number', 'boolean'].includes(typeof item))
@@ -65,7 +65,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
     const { sheets } = await import('@/lib/google-sheets').then(({ getGoogleClients }) => getGoogleClients())
     let writtenRowNumber: number | undefined
     let headersForWrite = tab.headers
-    if (body.action === 'delete') {
+    if (body.action === 'payment-status') {
+      const statusIndex = tab.headers.findIndex(isPaymentStatusHeader)
+      if (statusIndex < 0) return NextResponse.json({ error: 'No se encontró la columna Estado en esta hoja' }, { status: 409 })
+      if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber || !tab.rows.some((row) => row.rowNumber === body.rowNumber)) {
+        return NextResponse.json({ error: 'No se encontró el registro que quieres actualizar' }, { status: 404 })
+      }
+      if (body.status !== 'Pagado' && body.status !== 'Pendiente') return NextResponse.json({ error: 'Estado de pago no válido' }, { status: 400 })
+      const column = toA1Column(tab.startColumnIndex + statusIndex)
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: spreadsheet.file.id,
+        range: `${sheetRange}${column}${body.rowNumber}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [[body.status]] },
+      })
+    } else if (body.action === 'delete') {
       if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) return NextResponse.json({ error: 'Fila no valida' }, { status: 400 })
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: spreadsheet.file.id,

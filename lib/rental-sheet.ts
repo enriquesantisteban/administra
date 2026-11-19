@@ -13,7 +13,8 @@ export function isCalculatedRentalHeader(header: string) {
 }
 
 export function isPaymentStatusHeader(header: string) {
-  return normalizeSheetHeader(header) === 'PAGADO'
+  const normalized = normalizeSheetHeader(header)
+  return normalized === 'ESTADO' || normalized === 'PAGADO'
 }
 
 const RENTAL_CURRENCY_HEADERS = new Set([
