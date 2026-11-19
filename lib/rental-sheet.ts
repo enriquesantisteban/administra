@@ -52,10 +52,9 @@ export function getRentalFormulaCells(headers: string[], startColumnIndex: numbe
 
   if (angel >= 0 && rent >= 0 && light >= 0 && water >= 0 && waste >= 0) {
     const angelMarked = `${orFunction}(${ref(angel)}="SI"${separator}${ref(angel)}="SÍ")`
-    const angelCalculation = `(${numeric(rent)}-175)+(${numeric(light)}-(${numeric(light)}*3/2))+(${numeric(water)}-(${numeric(water)}*3/2))+(${numeric(waste)}-(${numeric(waste)}*3/2))`
     const sharedCalculation = `(${numeric(rent)}-175)+(${numeric(light)}/3*2)+(${numeric(water)}/3*2)+(${numeric(waste)}/3*2)`
 
-    if (angelTotal >= 0) formulas.set(startColumnIndex + angelTotal, `=${ifFunction}(${angelMarked}${separator}${angelCalculation}${separator}"")`)
+    if (angelTotal >= 0) formulas.set(startColumnIndex + angelTotal, `=${componentSum}`)
     if (rentalTotal >= 0) formulas.set(startColumnIndex + rentalTotal, `=${ifFunction}(${angelMarked}${separator}${sharedCalculation}${separator}${componentSum})`)
   } else if (rentalTotal >= 0 && totalComponents.length > 0) {
     formulas.set(startColumnIndex + rentalTotal, `=${componentSum}`)

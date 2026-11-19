@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
+import { getGoogleSheetTables, getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
 import { getRentalFormulaCells, isCalculatedRentalHeader, isPaymentStatusHeader, toA1Column } from '@/lib/rental-sheet'
 
 function isCellValueArray(value: unknown): value is Array<string | number | boolean> {
@@ -106,6 +106,31 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
           fields: 'userEnteredValue',
         },
       })
+      if (currentStatusIndex < 0) {
+        const tableMetadata = await sheets.spreadsheets.get({
+          spreadsheetId: spreadsheet.file.id,
+          fields: 'tables(tableId,name,range,columnProperties)',
+        })
+        const paymentTable = getGoogleSheetTables(tableMetadata.data).find((table) => table.range?.sheetId === tab.sheetId)
+        if (paymentTable?.tableId && paymentTable.range) {
+          const tableColumnIndex = statusColumn - (paymentTable.range.startColumnIndex ?? tab.startColumnIndex)
+          const columns = (paymentTable.columnProperties ?? []).filter((column) => column.columnIndex !== tableColumnIndex)
+          columns.push({ columnIndex: tableColumnIndex, columnName: 'PAGADO' })
+          requests.push({
+            updateTable: {
+              table: {
+                tableId: paymentTable.tableId,
+                range: {
+                  ...paymentTable.range,
+                  endColumnIndex: Math.max(paymentTable.range.endColumnIndex ?? statusColumn, statusColumn + 1),
+                },
+                columnProperties: columns,
+              },
+              fields: 'range.endColumnIndex,columnProperties',
+            },
+          })
+        }
+      }
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: spreadsheet.file.id,
         requestBody: { requests },

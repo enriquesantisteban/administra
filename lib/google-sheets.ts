@@ -66,6 +66,17 @@ export async function getGoogleClients() {
   return { sheets: google.sheets({ version: 'v4', auth: googleAuth }) }
 }
 
+export type GoogleSheetTable = {
+  tableId?: string | null
+  range?: { sheetId?: number | null; startColumnIndex?: number | null; endColumnIndex?: number | null } | null
+  columnProperties?: Array<{ columnIndex?: number | null; columnName?: string | null }> | null
+}
+
+export function getGoogleSheetTables(data: unknown): GoogleSheetTable[] {
+  if (typeof data !== 'object' || data === null || !('tables' in data) || !Array.isArray(data.tables)) return []
+  return data.tables.filter((table): table is GoogleSheetTable => typeof table === 'object' && table !== null)
+}
+
 export async function getRentalSpreadsheet() {
   const configuredSheetId = process.env.GOOGLE_SHEET_ID?.trim()
   if (!configuredSheetId) throw new Error('GOOGLE_SHEET_ID_NOT_CONFIGURED')

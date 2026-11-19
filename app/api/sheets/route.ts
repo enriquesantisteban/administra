@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getGoogleClients, getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
+import { getGoogleClients, getGoogleSheetTables, getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
 
 export async function GET() {
   try {
@@ -66,13 +66,54 @@ export async function POST(request: Request) {
           duplicateSheet: {
             sourceSheetId: template.sheetId,
             insertSheetIndex: spreadsheet.sheetCount,
-            newSheetName: `Alquiler_${year}`,
+            newSheetName: year,
           },
         }],
       },
     })
     const sheetId = duplicate.data.replies?.[0]?.duplicateSheet?.properties?.sheetId
     if (typeof sheetId !== 'number') throw new Error('DUPLICATED_SHEET_ID_NOT_RETURNED')
+
+    const tableName = `Alquiler_${year}`
+    const tableMetadata = await sheets.spreadsheets.get({
+      spreadsheetId: spreadsheet.file.id,
+      fields: 'tables(tableId,name,range,columnProperties)',
+    })
+    const copiedTable = getGoogleSheetTables(tableMetadata.data).find((table) => table.range?.sheetId === sheetId)
+    if (copiedTable?.tableId) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: spreadsheet.file.id,
+        requestBody: {
+          requests: [{
+            updateTable: {
+              table: { tableId: copiedTable.tableId, name: tableName },
+              fields: 'name',
+            },
+          }],
+        },
+      })
+    } else {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: spreadsheet.file.id,
+        requestBody: {
+          requests: [{
+            addTable: {
+              table: {
+                name: tableName,
+                range: {
+                  sheetId,
+                  startRowIndex: template.headerRowNumber - 1,
+                  endRowIndex: template.headerRowNumber + 1,
+                  startColumnIndex: template.startColumnIndex,
+                  endColumnIndex: template.startColumnIndex + template.headers.length,
+                },
+                columnProperties: template.headers.map((columnName, columnIndex) => ({ columnName, columnIndex })),
+              },
+            },
+          }],
+        },
+      })
+    }
 
     const requests = template.rows.map((row) => {
       return {
