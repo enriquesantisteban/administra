@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getGoogleClients, getGoogleSheetTables, getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
-import { getRentalCurrencyFormatRequests } from '@/lib/rental-sheet'
+import { getRentalCurrencyFormatRequests, isPaymentStatusHeader, normalizeSheetHeader, RENTAL_MONTHS } from '@/lib/rental-sheet'
 
 export async function GET() {
   try {
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   try {
     await getSignedInUser()
     const body = await request.json() as { action?: string; templateYear?: string; year?: string }
-    if (body.action !== 'create-year' && body.action !== 'delete-year') {
+    if (body.action !== 'create-year' && body.action !== 'delete-year' && body.action !== 'set-payment-history') {
       return NextResponse.json({ error: 'Acción no válida' }, { status: 400 })
     }
 
@@ -51,6 +51,61 @@ export async function POST(request: Request) {
       return NextResponse.json({ year: body.year })
     }
 
+    if (body.action === 'set-payment-history') {
+      const { sheets } = await getGoogleClients()
+      let paidCount = 0
+      let pendingCount = 0
+      for (const annualSheet of spreadsheet.years) {
+        const monthColumn = annualSheet.headers.findIndex((header) => ['MES', 'MESES'].includes(normalizeSheetHeader(header)))
+        const statusIndex = annualSheet.headers.findIndex(isPaymentStatusHeader)
+        const statusColumn = annualSheet.startColumnIndex + (statusIndex >= 0 ? statusIndex : annualSheet.headers.length)
+        const requests = []
+        if (statusIndex < 0) {
+          requests.push({
+            updateCells: {
+              range: {
+                sheetId: annualSheet.sheetId,
+                startRowIndex: annualSheet.headerRowNumber - 1,
+                endRowIndex: annualSheet.headerRowNumber,
+                startColumnIndex: statusColumn,
+                endColumnIndex: statusColumn + 1,
+              },
+              rows: [{ values: [{ userEnteredValue: { stringValue: 'PAGADO' } }] }],
+              fields: 'userEnteredValue',
+            },
+          })
+        }
+        for (const row of annualSheet.rows) {
+          const year = Number(annualSheet.year)
+          const month = normalizeSheetHeader(row.values[monthColumn] ?? '')
+          const monthIndex = RENTAL_MONTHS.findIndex((name) => month.startsWith(normalizeSheetHeader(name)))
+          const isPaid = year < 2026 || (year === 2026 && monthIndex >= 0 && monthIndex <= 10)
+          const status = isPaid ? 'PAGADO' : 'PENDIENTE'
+          if (isPaid) paidCount++
+          else pendingCount++
+          requests.push({
+            updateCells: {
+              range: {
+                sheetId: annualSheet.sheetId,
+                startRowIndex: row.rowNumber - 1,
+                endRowIndex: row.rowNumber,
+                startColumnIndex: statusColumn,
+                endColumnIndex: statusColumn + 1,
+              },
+              rows: [{ values: [{ userEnteredValue: { stringValue: status } }] }],
+              fields: 'userEnteredValue',
+            },
+          })
+        }
+        if (requests.length) {
+          await sheets.spreadsheets.batchUpdate({
+            spreadsheetId: spreadsheet.file.id,
+            requestBody: { requests },
+          })
+        }
+      }
+      return NextResponse.json({ paidCount, pendingCount })
+    }
     if (!body.templateYear || !/^\d{4}$/.test(body.templateYear)) {
       return NextResponse.json({ error: 'Selecciona un año válido como plantilla' }, { status: 400 })
     }
@@ -74,6 +129,15 @@ export async function POST(request: Request) {
     })
     const sheetId = duplicate.data.replies?.[0]?.duplicateSheet?.properties?.sheetId
     if (typeof sheetId !== 'number') throw new Error('DUPLICATED_SHEET_ID_NOT_RETURNED')
+
+    const lastDataRow = template.rows.reduce((last, row) => Math.max(last, row.rowNumber), template.headerRowNumber)
+    if (lastDataRow > template.headerRowNumber) {
+      await sheets.spreadsheets.values.clear({
+        spreadsheetId: spreadsheet.file.id,
+        range: `'${year}'!A${template.headerRowNumber + 1}:Z${lastDataRow}`,
+      })
+    }
+
     const yearLabelValues = await sheets.spreadsheets.values.get({
       spreadsheetId: spreadsheet.file.id,
       range: `'${template.title.replaceAll("'", "''")}'!A3:Z4`,
@@ -149,13 +213,8 @@ export async function POST(request: Request) {
       })
     }
 
-    const lastDataRow = template.rows.reduce((last, row) => Math.max(last, row.rowNumber), template.headerRowNumber)
     const tableBodyEndRowIndex = Math.max(tableEndRowIndex, lastDataRow)
-    if (tableBodyEndRowIndex > template.headerRowNumber) {
-      await sheets.spreadsheets.values.clear({
-        spreadsheetId: spreadsheet.file.id,
-        range: `'${year}'!A${template.headerRowNumber + 1}:Z${tableBodyEndRowIndex}`,
-      })
+    if (tableBodyEndRowIndex > template.headerRowNumber + 1) {
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: spreadsheet.file.id,
         requestBody: {
@@ -164,37 +223,9 @@ export async function POST(request: Request) {
               range: {
                 sheetId,
                 dimension: 'ROWS',
-                startIndex: template.headerRowNumber,
+                startIndex: template.headerRowNumber + 1,
                 endIndex: tableBodyEndRowIndex,
               },
-            },
-          }],
-        },
-      })
-    }
-
-    const tableAfterClearMetadata = await sheets.spreadsheets.get({
-      spreadsheetId: spreadsheet.file.id,
-      fields: 'tables(tableId,name,range,columnProperties)',
-    })
-    const emptyTable = getGoogleSheetTables(tableAfterClearMetadata.data).find((table) => table.range?.sheetId === sheetId)
-    if (emptyTable?.tableId) {
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId: spreadsheet.file.id,
-        requestBody: {
-          requests: [{
-            updateTable: {
-              table: {
-                tableId: emptyTable.tableId,
-                range: {
-                  sheetId,
-                  startRowIndex: template.headerRowNumber - 1,
-                  endRowIndex: template.headerRowNumber,
-                  startColumnIndex: template.startColumnIndex,
-                  endColumnIndex: template.startColumnIndex + template.headers.length,
-                },
-              },
-              fields: 'range',
             },
           }],
         },

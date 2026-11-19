@@ -60,20 +60,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
     if (!spreadsheet?.file.id || !tab) return NextResponse.json({ error: 'No se encuentra la hoja de ese año' }, { status: 404 })
     const sheetRange = `'${tab.title.replaceAll("'", "''")}'!`
     const firstColumn = toA1Column(tab.startColumnIndex)
-    const lastColumn = toA1Column(tab.startColumnIndex + tab.headers.length - 1)
 
     const body = await request.json() as { action?: string; rowNumber?: number; values?: unknown[]; status?: string }
     const { sheets } = await import('@/lib/google-sheets').then(({ getGoogleClients }) => getGoogleClients())
     let writtenRowNumber: number | undefined
+    let headersForWrite = tab.headers
     if (body.action === 'payment-status') {
       if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) {
-        return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
+        return NextResponse.json({ error: 'Fila no valida' }, { status: 400 })
       }
       if (!tab.rows.some((row) => row.rowNumber === body.rowNumber)) {
-        return NextResponse.json({ error: 'No se encontró el registro seleccionado' }, { status: 404 })
+        return NextResponse.json({ error: 'No se encontro el registro seleccionado' }, { status: 404 })
       }
       if (body.status !== 'PAGADO' && body.status !== 'PENDIENTE') {
-        return NextResponse.json({ error: 'El estado de pago no es válido' }, { status: 400 })
+        return NextResponse.json({ error: 'El estado de pago no es valido' }, { status: 400 })
       }
       const currentStatusIndex = tab.headers.findIndex(isPaymentStatusHeader)
       const statusColumn = tab.startColumnIndex + (currentStatusIndex >= 0 ? currentStatusIndex : tab.headers.length)
@@ -106,37 +106,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
           fields: 'userEnteredValue',
         },
       })
-      if (currentStatusIndex < 0) {
-        const tableMetadata = await sheets.spreadsheets.get({
-          spreadsheetId: spreadsheet.file.id,
-          fields: 'tables(tableId,name,range,columnProperties)',
-        })
-        const paymentTable = getGoogleSheetTables(tableMetadata.data).find((table) => table.range?.sheetId === tab.sheetId)
-        if (paymentTable?.tableId && paymentTable.range) {
-          const tableColumnIndex = statusColumn - (paymentTable.range.startColumnIndex ?? tab.startColumnIndex)
-          const columns = (paymentTable.columnProperties ?? []).filter((column) => column.columnIndex !== tableColumnIndex)
-          columns.push({ columnIndex: tableColumnIndex, columnName: 'PAGADO' })
-          requests.push({
-            updateTable: {
-              table: {
-                tableId: paymentTable.tableId,
-                range: {
-                  ...paymentTable.range,
-                  endColumnIndex: Math.max(paymentTable.range.endColumnIndex ?? statusColumn, statusColumn + 1),
-                },
-                columnProperties: columns,
-              },
-              fields: 'range.endColumnIndex,columnProperties',
-            },
-          })
-        }
-      }
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: spreadsheet.file.id,
         requestBody: { requests },
       })
     } else if (body.action === 'delete') {
-      if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
+      if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) return NextResponse.json({ error: 'Fila no valida' }, { status: 400 })
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: spreadsheet.file.id,
         requestBody: { requests: [{ deleteDimension: { range: { sheetId: tab.sheetId, dimension: 'ROWS', startIndex: body.rowNumber! - 1, endIndex: body.rowNumber! } } }] },
@@ -145,10 +120,38 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
       const values = body.values
       if (!isCellValueArray(values) || values.length !== tab.headers.length) return NextResponse.json({ error: 'La fila no coincide con las columnas de la hoja o contiene datos no válidos' }, { status: 400 })
       if (body.action === 'add') {
-        const appendValues = values.map((value, index) => isCalculatedRentalHeader(tab.headers[index]) ? '' : value)
+        let rowValues = [...values]
+        const paymentStatusIndex = tab.headers.findIndex(isPaymentStatusHeader)
+        if (paymentStatusIndex < 0) {
+          headersForWrite = [...tab.headers, 'PAGADO']
+          rowValues.push('PENDIENTE')
+          const statusColumn = tab.startColumnIndex + tab.headers.length
+          await sheets.spreadsheets.batchUpdate({
+            spreadsheetId: spreadsheet.file.id,
+            requestBody: {
+              requests: [{
+                updateCells: {
+                  range: {
+                    sheetId: tab.sheetId,
+                    startRowIndex: tab.headerRowNumber - 1,
+                    endRowIndex: tab.headerRowNumber,
+                    startColumnIndex: statusColumn,
+                    endColumnIndex: statusColumn + 1,
+                  },
+                  rows: [{ values: [{ userEnteredValue: { stringValue: 'PAGADO' } }] }],
+                  fields: 'userEnteredValue',
+                },
+              }],
+            },
+          })
+        } else if (!String(rowValues[paymentStatusIndex] ?? '').trim()) {
+          rowValues[paymentStatusIndex] = 'PENDIENTE'
+        }
+        const appendValues = rowValues.map((value, index) => isCalculatedRentalHeader(headersForWrite[index]) ? '' : value)
+        const appendLastColumn = toA1Column(tab.startColumnIndex + headersForWrite.length - 1)
         const appended = await sheets.spreadsheets.values.append({
           spreadsheetId: spreadsheet.file.id,
-          range: `${sheetRange}${firstColumn}${tab.headerRowNumber + 1}:${lastColumn}`,
+          range: `${sheetRange}${firstColumn}${tab.headerRowNumber + 1}:${appendLastColumn}`,
           valueInputOption: 'RAW',
           insertDataOption: 'INSERT_ROWS',
           requestBody: { values: [appendValues] },
@@ -168,16 +171,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
                   startRowIndex: rowNumber - 1,
                   endRowIndex: rowNumber,
                   startColumnIndex: tab.startColumnIndex,
-                  endColumnIndex: tab.startColumnIndex + tab.headers.length,
+                  endColumnIndex: tab.startColumnIndex + headersForWrite.length,
                 },
-                rows: [{ values: rowCells(values, tab.headers, tab.startColumnIndex, rowNumber, spreadsheet.locale, true) }],
+                rows: [{ values: rowCells(rowValues, headersForWrite, tab.startColumnIndex, rowNumber, spreadsheet.locale, true) }],
                 fields: 'userEnteredValue,userEnteredFormat.textFormat.foregroundColor',
               },
             }],
           },
         })
       } else {
-        if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
+        if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) return NextResponse.json({ error: 'Fila no valida' }, { status: 400 })
         writtenRowNumber = body.rowNumber
         await sheets.spreadsheets.batchUpdate({
           spreadsheetId: spreadsheet.file.id,
@@ -204,8 +207,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
     if (writtenRowNumber !== undefined) {
       const rowNumbers = new Set(tab.rows.map((row) => row.rowNumber))
       rowNumbers.add(writtenRowNumber)
-      const formulaRequests = formulaCellRequests(tab.sheetId, tab.headers, tab.startColumnIndex, [...rowNumbers], spreadsheet.locale)
-      const currencyFormatRequests = getRentalCurrencyFormatRequests(tab.sheetId, tab.headers, tab.startColumnIndex, writtenRowNumber - 1, writtenRowNumber)
+      const formulaRequests = formulaCellRequests(tab.sheetId, headersForWrite, tab.startColumnIndex, [...rowNumbers], spreadsheet.locale)
+      const currencyFormatRequests = getRentalCurrencyFormatRequests(tab.sheetId, headersForWrite, tab.startColumnIndex, writtenRowNumber - 1, writtenRowNumber)
       if (formulaRequests.length || currencyFormatRequests.length) {
         await sheets.spreadsheets.batchUpdate({
           spreadsheetId: spreadsheet.file.id,
