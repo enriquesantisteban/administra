@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { getGoogleClients, getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
-import { getRentalFormulaCells, normalizeSheetHeader } from '@/lib/rental-sheet'
 
 export async function GET() {
   try {
@@ -20,7 +19,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     await getSignedInUser()
-    const body = await request.json() as { action?: string }
+    const body = await request.json() as { action?: string; templateYear?: string }
     if (body.action !== 'create-year') return NextResponse.json({ error: 'Acción no válida' }, { status: 400 })
 
     const spreadsheet = await getRentalSpreadsheet()
@@ -28,8 +27,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No hay una hoja anual que se pueda copiar' }, { status: 409 })
     }
 
-    const template = [...spreadsheet.years].sort((a, b) => b.year.localeCompare(a.year))[0]
-    const year = String(Number(template.year) + 1)
+    if (!body.templateYear || !/^\d{4}$/.test(body.templateYear)) {
+      return NextResponse.json({ error: 'Selecciona un año válido como plantilla' }, { status: 400 })
+    }
+    const template = spreadsheet.years.find((item) => item.year === body.templateYear)
+    if (!template) return NextResponse.json({ error: 'No se encontró el año elegido como plantilla' }, { status: 404 })
+
+    const latestYear = Math.max(...spreadsheet.years.map((item) => Number(item.year)))
+    const year = String(latestYear + 1)
     const { sheets } = await getGoogleClients()
     const duplicate = await sheets.spreadsheets.batchUpdate({
       spreadsheetId: spreadsheet.file.id,
@@ -40,15 +45,7 @@ export async function POST(request: Request) {
     const sheetId = duplicate.data.replies?.[0]?.duplicateSheet?.properties?.sheetId
     if (typeof sheetId !== 'number') throw new Error('DUPLICATED_SHEET_ID_NOT_RETURNED')
 
-    const monthIndex = template.headers.findIndex((header) => normalizeSheetHeader(header) === 'MESES')
     const requests = template.rows.map((row) => {
-      const formulas = getRentalFormulaCells(template.headers, template.startColumnIndex, row.rowNumber)
-      const cells = template.headers.map((_, index) => {
-        const formula = formulas.get(template.startColumnIndex + index)
-        if (formula) return { userEnteredValue: { formulaValue: formula } }
-        if (index === monthIndex) return { userEnteredValue: { stringValue: String(row.values[index] ?? '') } }
-        return { userEnteredValue: { stringValue: '' } }
-      })
       return {
         updateCells: {
           range: {
@@ -58,7 +55,7 @@ export async function POST(request: Request) {
             startColumnIndex: template.startColumnIndex,
             endColumnIndex: template.startColumnIndex + template.headers.length,
           },
-          rows: [{ values: cells }],
+          rows: [{ values: template.headers.map(() => ({ userEnteredValue: { stringValue: '' } })) }],
           fields: 'userEnteredValue',
         },
       }
@@ -71,6 +68,10 @@ export async function POST(request: Request) {
       })
     }
 
+    const createdSpreadsheet = await getRentalSpreadsheet()
+    if (!createdSpreadsheet.years.some((item) => item.year === year)) {
+      throw new Error('CREATED_YEAR_NOT_FOUND')
+    }
     return NextResponse.json({ year })
   } catch (error) {
     if (error instanceof Error && error.message === 'UNAUTHORIZED') {
@@ -78,6 +79,11 @@ export async function POST(request: Request) {
     }
     const details = getGoogleSheetsErrorDetails(error)
     console.error('Google Sheets year creation failed', { status: details.status, code: details.code, providerMessage: details.providerMessage })
-    return NextResponse.json({ error: details.message }, { status: 502 })
+    const message = error instanceof Error && error.message === 'CREATED_YEAR_NOT_FOUND'
+      ? 'Google no confirmó la creación de la nueva hoja. Actualiza los datos y vuelve a intentarlo.'
+      : details.providerMessage
+        ? `Google Sheets: ${details.providerMessage}`
+        : details.message
+    return NextResponse.json({ error: message }, { status: 502 })
   }
 }

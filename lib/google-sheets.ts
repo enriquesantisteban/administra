@@ -76,7 +76,7 @@ export async function getRentalSpreadsheet() {
   const { sheets } = await getGoogleClients()
   const spreadsheet = await sheets.spreadsheets.get({
     spreadsheetId,
-    fields: 'spreadsheetId,properties(title),sheets(properties(sheetId,title,index))',
+    fields: 'spreadsheetId,properties(title,locale),sheets(properties(sheetId,title,index))',
   })
   const file = { id: spreadsheetId, name: spreadsheet.data.properties?.title ?? 'Google Sheets', webViewLink: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit` }
   const tabs = spreadsheet.data.sheets ?? []
@@ -119,5 +119,9 @@ export async function getRentalSpreadsheet() {
       })]
     }),
   )
-  return { file: { id: file.id, name: file.name ?? 'Alquiler Google Sheets', url: file.webViewLink ?? null }, years }
+  return {
+    file: { id: file.id, name: file.name ?? 'Alquiler Google Sheets', url: file.webViewLink ?? null },
+    locale: spreadsheet.data.properties?.locale ?? 'es',
+    years,
+  }
 }

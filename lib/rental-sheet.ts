@@ -23,10 +23,14 @@ export function toA1Column(index: number) {
   return column
 }
 
-export function getRentalFormulaCells(headers: string[], startColumnIndex: number, rowNumber: number) {
+export function getRentalFormulaCells(headers: string[], startColumnIndex: number, rowNumber: number, locale = 'es') {
   const find = (name: string) => headers.findIndex((header) => normalizeSheetHeader(header) === normalizeSheetHeader(name))
   const ref = (index: number) => `${toA1Column(startColumnIndex + index)}${rowNumber}`
   const formulas = new Map<number, string>()
+  const isSpanish = locale.toLowerCase().startsWith('es')
+  const ifFunction = isSpanish ? 'SI' : 'IF'
+  const orFunction = isSpanish ? 'O' : 'OR'
+  const separator = isSpanish ? ';' : ','
   const rent = find('ALQUILER')
   const community = find('COMUNIDAD')
   const light = find('LUZ')
@@ -39,22 +43,22 @@ export function getRentalFormulaCells(headers: string[], startColumnIndex: numbe
   const rentalTotal = find('TOTAL ALQUILER')
   const total = find('TOTAL')
   const totalComponents = [rent, community, light, water, waste].filter((index) => index >= 0)
-  const componentSum = `SUM(${totalComponents.map(ref).join(',')})`
+  const componentSum = totalComponents.map(ref).join('+') || '0'
 
   if (angel >= 0 && rent >= 0 && light >= 0 && water >= 0 && waste >= 0) {
-    const angelMarked = `OR(${ref(angel)}="SI",${ref(angel)}="SÍ",${ref(angel)}=TRUE)`
+    const angelMarked = `${orFunction}(${ref(angel)}="SI"${separator}${ref(angel)}="SÍ")`
     const angelCalculation = `(${ref(rent)}-175)+(${ref(light)}-(${ref(light)}*3/2))+(${ref(water)}-(${ref(water)}*3/2))+(${ref(waste)}-(${ref(waste)}*3/2))`
     const sharedCalculation = `(${ref(rent)}-175)+(${ref(light)}/3*2)+(${ref(water)}/3*2)+(${ref(waste)}/3*2)`
 
-    if (angelTotal >= 0) formulas.set(startColumnIndex + angelTotal, `=IF(${angelMarked},${angelCalculation},"")`)
-    if (rentalTotal >= 0) formulas.set(startColumnIndex + rentalTotal, `=IF(${angelMarked},${sharedCalculation},${componentSum})`)
+    if (angelTotal >= 0) formulas.set(startColumnIndex + angelTotal, `=${ifFunction}(${angelMarked}${separator}${angelCalculation}${separator}"")`)
+    if (rentalTotal >= 0) formulas.set(startColumnIndex + rentalTotal, `=${ifFunction}(${angelMarked}${separator}${sharedCalculation}${separator}${componentSum})`)
   } else if (rentalTotal >= 0 && totalComponents.length > 0) {
     formulas.set(startColumnIndex + rentalTotal, `=${componentSum}`)
   }
 
   if (total >= 0 && rentalTotal >= 0 && purchases >= 0) {
     const purchasesValue = halfPurchases >= 0
-      ? `IF(OR(${ref(halfPurchases)}="SI",${ref(halfPurchases)}="SÍ",${ref(halfPurchases)}=TRUE),${ref(purchases)}/2,${ref(purchases)})`
+      ? `${ifFunction}(${orFunction}(${ref(halfPurchases)}="SI"${separator}${ref(halfPurchases)}="SÍ")${separator}${ref(purchases)}/2${separator}${ref(purchases)})`
       : ref(purchases)
     formulas.set(startColumnIndex + total, `=${ref(rentalTotal)}+${purchasesValue}`)
   }

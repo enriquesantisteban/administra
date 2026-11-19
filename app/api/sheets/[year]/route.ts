@@ -6,8 +6,8 @@ function isCellValueArray(value: unknown): value is Array<string | number | bool
   return Array.isArray(value) && value.every((item) => ['string', 'number', 'boolean'].includes(typeof item))
 }
 
-function rowCells(values: Array<string | number | boolean>, headers: string[], startColumnIndex: number, rowNumber: number) {
-  const formulas = getRentalFormulaCells(headers, startColumnIndex, rowNumber)
+function rowCells(values: Array<string | number | boolean>, headers: string[], startColumnIndex: number, rowNumber: number, locale: string) {
+  const formulas = getRentalFormulaCells(headers, startColumnIndex, rowNumber, locale)
   return values.map((value, index) => {
     const formula = formulas.get(startColumnIndex + index)
     if (formula) return { userEnteredValue: { formulaValue: formula } }
@@ -17,11 +17,31 @@ function rowCells(values: Array<string | number | boolean>, headers: string[], s
   })
 }
 
+function formulaCellRequests(sheetId: number, headers: string[], startColumnIndex: number, rowNumbers: number[], locale: string) {
+  return rowNumbers.flatMap((rowNumber) => {
+    const formulas = getRentalFormulaCells(headers, startColumnIndex, rowNumber, locale)
+    return [...formulas.entries()].map(([columnIndex, formula]) => ({
+      updateCells: {
+        range: {
+          sheetId,
+          startRowIndex: rowNumber - 1,
+          endRowIndex: rowNumber,
+          startColumnIndex: columnIndex,
+          endColumnIndex: columnIndex + 1,
+        },
+        rows: [{ values: [{ userEnteredValue: { formulaValue: formula } }] }],
+        fields: 'userEnteredValue',
+      },
+    }))
+  })
+}
+
 const respondToError = (error: unknown) => {
   if (error instanceof Error && error.message === 'UNAUTHORIZED') return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
   const details = getGoogleSheetsErrorDetails(error)
   console.error('Google Sheets update failed', { status: details.status, code: details.code, providerMessage: details.providerMessage })
-  return NextResponse.json({ error: details.message }, { status: 502 })
+  const message = details.providerMessage ? `Google Sheets: ${details.providerMessage}` : details.message
+  return NextResponse.json({ error: message }, { status: 502 })
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ year: string }> }) {
@@ -38,6 +58,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
 
     const body = await request.json() as { action?: string; rowNumber?: number; values?: unknown[] }
     const { sheets } = await import('@/lib/google-sheets').then(({ getGoogleClients }) => getGoogleClients())
+    let writtenRowNumber: number | undefined
     if (body.action === 'delete') {
       if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
       await sheets.spreadsheets.batchUpdate({
@@ -51,7 +72,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
         const appendValues = values.map((value, index) => isCalculatedRentalHeader(tab.headers[index]) ? '' : value)
         const appended = await sheets.spreadsheets.values.append({
           spreadsheetId: spreadsheet.file.id,
-          range: `${sheetRange}${firstColumn}:${lastColumn}`,
+          range: `${sheetRange}${firstColumn}${tab.headerRowNumber + 1}:${lastColumn}`,
           valueInputOption: 'RAW',
           insertDataOption: 'INSERT_ROWS',
           requestBody: { values: [appendValues] },
@@ -60,6 +81,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
         const startCell = updatedRange?.slice((updatedRange.lastIndexOf('!') + 1)).split(':')[0]
         const rowNumber = Number(startCell?.match(/\d+$/)?.[0])
         if (!Number.isInteger(rowNumber) || rowNumber <= tab.headerRowNumber) throw new Error('APPENDED_ROW_NOT_RETURNED')
+        writtenRowNumber = rowNumber
         await sheets.spreadsheets.batchUpdate({
           spreadsheetId: spreadsheet.file.id,
           requestBody: {
@@ -72,7 +94,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
                   startColumnIndex: tab.startColumnIndex,
                   endColumnIndex: tab.startColumnIndex + tab.headers.length,
                 },
-                rows: [{ values: rowCells(values, tab.headers, tab.startColumnIndex, rowNumber) }],
+                rows: [{ values: rowCells(values, tab.headers, tab.startColumnIndex, rowNumber, spreadsheet.locale) }],
                 fields: 'userEnteredValue',
               },
             }],
@@ -80,6 +102,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
         })
       } else {
         if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
+        writtenRowNumber = body.rowNumber
         await sheets.spreadsheets.batchUpdate({
           spreadsheetId: spreadsheet.file.id,
           requestBody: {
@@ -92,7 +115,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
                   startColumnIndex: tab.startColumnIndex,
                   endColumnIndex: tab.startColumnIndex + tab.headers.length,
                 },
-                rows: [{ values: rowCells(values, tab.headers, tab.startColumnIndex, body.rowNumber!) }],
+                rows: [{ values: rowCells(values, tab.headers, tab.startColumnIndex, body.rowNumber!, spreadsheet.locale) }],
                 fields: 'userEnteredValue',
               },
             }],
@@ -101,6 +124,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
       }
     } else {
       return NextResponse.json({ error: 'Acción no válida' }, { status: 400 })
+    }
+    if (writtenRowNumber !== undefined) {
+      const rowNumbers = new Set(tab.rows.map((row) => row.rowNumber))
+      rowNumbers.add(writtenRowNumber)
+      const formulaRequests = formulaCellRequests(tab.sheetId, tab.headers, tab.startColumnIndex, [...rowNumbers], spreadsheet.locale)
+      if (formulaRequests.length) {
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId: spreadsheet.file.id,
+          requestBody: { requests: formulaRequests },
+        })
+      }
     }
     return NextResponse.json({ ok: true })
   } catch (error) {
