@@ -14,6 +14,11 @@ function amount(value: unknown) {
   return Number(normalized.includes(',') ? normalized.replace(/\\./g, '').replace(',', '.') : normalized.replace(/,/g, '')) || 0
 }
 
+function isEnabled(value: unknown) {
+  if (typeof value === 'boolean') return value
+  return ['si', 'sí', 'true', 'yes', '1'].includes(String(value ?? '').trim().toLocaleLowerCase('es'))
+}
+
 function columnIndex(headers: string[], matcher: RegExp) {
   return headers.findIndex((header) => matcher.test(header.trim().toUpperCase()))
 }
@@ -60,7 +65,7 @@ export function RentalCharts({ years }: { years: RentalYear[] }) {
       Basura: year.rows.reduce((sum, row) => sum + amount(row.values[wasteIndex]), 0),
       Compras: year.rows.reduce((sum, row) => {
         const purchases = amount(row.values[purchasesIndex])
-        return sum + (row.values[sharedIndex] === true ? purchases / 2 : purchases)
+        return sum + (isEnabled(row.values[sharedIndex]) ? purchases / 2 : purchases)
       }, 0),
     }
   })

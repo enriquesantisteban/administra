@@ -11,25 +11,39 @@ export function getGoogleSheetsErrorDetails(error: unknown) {
   const status = response && typeof response === 'object' && 'status' in response && typeof response.status === 'number'
     ? response.status
     : undefined
+  const responseData = response && typeof response === 'object' && 'data' in response ? response.data : null
+  const providerError = responseData && typeof responseData === 'object' && 'error' in responseData ? responseData.error : null
+  const providerMessage = providerError && typeof providerError === 'object' && 'message' in providerError && typeof providerError.message === 'string'
+    ? providerError.message.slice(0, 500)
+    : undefined
   const rawCode = errorObject && 'code' in errorObject ? errorObject.code : undefined
   const code = typeof rawCode === 'string' || typeof rawCode === 'number' ? rawCode : undefined
 
+  if (message === 'SHEET_HEADERS_NOT_FOUND') {
+    return { status, code, providerMessage, message: 'No se encontró una tabla con las columnas MESES, ALQUILER y TOTAL en una hoja anual.' }
+  }
   if (message === 'GOOGLE_SERVICE_ACCOUNT_NOT_CONFIGURED') {
-    return { status, code, message: 'Falta configurar GOOGLE_SERVICE_ACCOUNT_EMAIL o GOOGLE_PRIVATE_KEY en el servidor.' }
+    return { status, code, providerMessage, message: 'Falta configurar GOOGLE_SERVICE_ACCOUNT_EMAIL o GOOGLE_PRIVATE_KEY en el servidor.' }
   }
   if (message === 'GOOGLE_SHEET_ID_NOT_CONFIGURED') {
-    return { status, code, message: 'Falta configurar GOOGLE_SHEET_ID en el servidor.' }
+    return { status, code, providerMessage, message: 'Falta configurar GOOGLE_SHEET_ID en el servidor.' }
+  }
+  if (message === 'GOOGLE_SHEET_ID_INVALID') {
+    return { status, code, providerMessage, message: 'GOOGLE_SHEET_ID no parece un ID ni un enlace válido de Google Sheets.' }
   }
   if (status === 403) {
-    return { status, code, message: 'Google ha denegado el acceso. Comparte la hoja con GOOGLE_SERVICE_ACCOUNT_EMAIL y dale permiso de editor.' }
+    return { status, code, providerMessage, message: 'Google ha denegado el acceso. Comparte la hoja con GOOGLE_SERVICE_ACCOUNT_EMAIL y dale permiso de editor.' }
   }
   if (status === 404) {
-    return { status, code, message: 'No se encontró la hoja de Google. Comprueba que GOOGLE_SHEET_ID sea correcto.' }
+    return { status, code, providerMessage, message: 'No se encontró la hoja de Google. Comprueba que GOOGLE_SHEET_ID sea correcto.' }
   }
-  if (status === 401 || /invalid_grant|invalid jwt|private key|pem|decoder/i.test(message)) {
-    return { status, code, message: 'Las credenciales de Google no son válidas. Revisa GOOGLE_SERVICE_ACCOUNT_EMAIL y GOOGLE_PRIVATE_KEY en el servidor.' }
+  if (status === 401 || /invalid_grant|invalid jwt|private key|pem|decoder/i.test(`${message} ${providerMessage ?? ''}`)) {
+    return { status, code, providerMessage, message: 'Las credenciales de Google no son válidas. Revisa GOOGLE_SERVICE_ACCOUNT_EMAIL y GOOGLE_PRIVATE_KEY en el servidor.' }
   }
-  return { status, code, message: 'No se pudo conectar con Google Sheets. Revisa la configuración del servidor e inténtalo de nuevo.' }
+  if (status === 400) {
+    return { status, code, providerMessage, message: 'Google rechazó la solicitud. Comprueba que GOOGLE_SHEET_ID sea solo el ID de la hoja o un enlace válido.' }
+  }
+  return { status, code, providerMessage, message: 'No se pudo conectar con Google Sheets. Revisa la configuración del servidor e inténtalo de nuevo.' }
 }
 
 export async function getSignedInUser() {
@@ -52,8 +66,12 @@ export async function getGoogleClients() {
 }
 
 export async function getRentalSpreadsheet() {
-  const spreadsheetId = process.env.GOOGLE_SHEET_ID
-  if (!spreadsheetId) throw new Error('GOOGLE_SHEET_ID_NOT_CONFIGURED')
+  const configuredSheetId = process.env.GOOGLE_SHEET_ID?.trim()
+  if (!configuredSheetId) throw new Error('GOOGLE_SHEET_ID_NOT_CONFIGURED')
+  const spreadsheetId = configuredSheetId.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/)?.[1] ?? configuredSheetId
+  if (/^https?:\/\//i.test(configuredSheetId) && spreadsheetId === configuredSheetId) {
+    throw new Error('GOOGLE_SHEET_ID_INVALID')
+  }
   const { sheets } = await getGoogleClients()
   const spreadsheet = await sheets.spreadsheets.get({
     spreadsheetId,
@@ -64,7 +82,7 @@ export async function getRentalSpreadsheet() {
   const years = await Promise.all(
     tabs.flatMap((tab) => {
       const title = tab.properties?.title ?? ''
-      const year = title.match(/^Alquiler_(\d{4})$/)?.[1]
+      const year = title.match(/^(?:Alquiler_)?(\d{4})$/)?.[1]
       if (!year) return []
       const range = `'${title.replaceAll("'", "''")}'!A:Z`
       return [sheets.spreadsheets.values.get({
@@ -72,16 +90,31 @@ export async function getRentalSpreadsheet() {
         range,
         valueRenderOption: 'UNFORMATTED_VALUE',
         dateTimeRenderOption: 'SERIAL_NUMBER',
-      }).then((result) => ({
-        year,
-        title,
-        sheetId: tab.properties?.sheetId ?? 0,
-        headers: (result.data.values?.[0] ?? []).map((value) => String(value ?? '')),
-        rows: (result.data.values ?? []).slice(1).map((values, index) => ({
-          rowNumber: index + 2,
-          values: (result.data.values?.[0] ?? []).map((_, column) => values[column] ?? ''),
-        })),
-      }))]
+      }).then((result) => {
+        const values = result.data.values ?? []
+        const headerIndex = values.findIndex((row) => {
+          const headers = row.map((value) => String(value ?? '').trim().toUpperCase())
+          return headers.includes('MESES') && headers.includes('ALQUILER') && headers.includes('TOTAL')
+        })
+        if (headerIndex < 0) throw new Error('SHEET_HEADERS_NOT_FOUND')
+
+        const headerRow = values[headerIndex]
+        const startColumnIndex = headerRow.findIndex((value) => String(value ?? '').trim() !== '')
+        if (startColumnIndex < 0) throw new Error('SHEET_HEADERS_NOT_FOUND')
+        const headers = headerRow.slice(startColumnIndex).map((value) => String(value ?? ''))
+
+        return {
+          year,
+          title,
+          sheetId: tab.properties?.sheetId ?? 0,
+          startColumnIndex,
+          headers,
+          rows: values.slice(headerIndex + 1).map((row, index) => ({
+            rowNumber: headerIndex + index + 2,
+            values: headers.map((_, column) => row[startColumnIndex + column] ?? ''),
+          })).filter((row) => row.values.some((value) => value !== '')),
+        }
+      })]
     }),
   )
   return { file: { id: file.id, name: file.name ?? 'Alquiler Google Sheets', url: file.webViewLink ?? null }, years }

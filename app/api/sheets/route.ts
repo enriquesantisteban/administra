@@ -11,7 +11,7 @@ export async function GET() {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
     }
     const details = getGoogleSheetsErrorDetails(error)
-    console.error('Google Sheets read failed', { status: details.status, code: details.code })
+    console.error('Google Sheets read failed', { status: details.status, code: details.code, providerMessage: details.providerMessage })
     return NextResponse.json({ error: details.message }, { status: 502 })
   }
 }

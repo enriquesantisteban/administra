@@ -1,10 +1,21 @@
 import { NextResponse } from 'next/server'
 import { getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
 
+function columnName(index: number) {
+  let number = index + 1
+  let name = ''
+  while (number > 0) {
+    const remainder = (number - 1) % 26
+    name = String.fromCharCode(65 + remainder) + name
+    number = Math.floor((number - 1) / 26)
+  }
+  return name
+}
+
 const respondToError = (error: unknown) => {
   if (error instanceof Error && error.message === 'UNAUTHORIZED') return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
   const details = getGoogleSheetsErrorDetails(error)
-  console.error('Google Sheets update failed', { status: details.status, code: details.code })
+  console.error('Google Sheets update failed', { status: details.status, code: details.code, providerMessage: details.providerMessage })
   return NextResponse.json({ error: details.message }, { status: 502 })
 }
 
@@ -16,6 +27,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
     const spreadsheet = await getRentalSpreadsheet()
     const tab = spreadsheet?.years.find((item) => item.year === year)
     if (!spreadsheet?.file.id || !tab) return NextResponse.json({ error: 'No se encuentra la hoja de ese año' }, { status: 404 })
+    const sheetRange = `'${tab.title.replaceAll("'", "''")}'!`
+    const firstColumn = columnName(tab.startColumnIndex)
+    const lastColumn = columnName(tab.startColumnIndex + tab.headers.length - 1)
 
     const body = await request.json() as { action?: string; rowNumber?: number; values?: unknown[] }
     const { sheets } = await import('@/lib/google-sheets').then(({ getGoogleClients }) => getGoogleClients())
@@ -31,7 +45,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
       if (body.action === 'add') {
         await sheets.spreadsheets.values.append({
           spreadsheetId: spreadsheet.file.id,
-          range: `'${tab.title.replaceAll("'", "''")}'!A:Z`,
+          range: `${sheetRange}${firstColumn}:${lastColumn}`,
           valueInputOption: 'USER_ENTERED',
           insertDataOption: 'INSERT_ROWS',
           requestBody: { values: [body.values as (string | number | boolean)[]] },
@@ -40,7 +54,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
         if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) < 2) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
         await sheets.spreadsheets.values.update({
           spreadsheetId: spreadsheet.file.id,
-          range: `'${tab.title.replaceAll("'", "''")}'!A${body.rowNumber}:Z${body.rowNumber}`,
+          range: `${sheetRange}${firstColumn}${body.rowNumber}:${lastColumn}${body.rowNumber}`,
           valueInputOption: 'USER_ENTERED',
           requestBody: { values: [body.values as (string | number | boolean)[]] },
         })
