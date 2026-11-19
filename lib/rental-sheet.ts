@@ -12,6 +12,10 @@ export function isCalculatedRentalHeader(header: string) {
   return ['TOTAL ALQUILER CON ANGEL', 'TOTAL ALQUILER', 'TOTAL'].includes(normalized)
 }
 
+export function isPaymentStatusHeader(header: string) {
+  return normalizeSheetHeader(header) === 'PAGADO'
+}
+
 export function toA1Column(index: number) {
   let number = index + 1
   let column = ''
@@ -43,12 +47,13 @@ export function getRentalFormulaCells(headers: string[], startColumnIndex: numbe
   const rentalTotal = find('TOTAL ALQUILER')
   const total = find('TOTAL')
   const totalComponents = [rent, community, light, water, waste].filter((index) => index >= 0)
-  const componentSum = totalComponents.map(ref).join('+') || '0'
+  const numeric = (index: number) => `N(${ref(index)})`
+  const componentSum = totalComponents.map(numeric).join('+') || '0'
 
   if (angel >= 0 && rent >= 0 && light >= 0 && water >= 0 && waste >= 0) {
     const angelMarked = `${orFunction}(${ref(angel)}="SI"${separator}${ref(angel)}="SÍ")`
-    const angelCalculation = `(${ref(rent)}-175)+(${ref(light)}-(${ref(light)}*3/2))+(${ref(water)}-(${ref(water)}*3/2))+(${ref(waste)}-(${ref(waste)}*3/2))`
-    const sharedCalculation = `(${ref(rent)}-175)+(${ref(light)}/3*2)+(${ref(water)}/3*2)+(${ref(waste)}/3*2)`
+    const angelCalculation = `(${numeric(rent)}-175)+(${numeric(light)}-(${numeric(light)}*3/2))+(${numeric(water)}-(${numeric(water)}*3/2))+(${numeric(waste)}-(${numeric(waste)}*3/2))`
+    const sharedCalculation = `(${numeric(rent)}-175)+(${numeric(light)}/3*2)+(${numeric(water)}/3*2)+(${numeric(waste)}/3*2)`
 
     if (angelTotal >= 0) formulas.set(startColumnIndex + angelTotal, `=${ifFunction}(${angelMarked}${separator}${angelCalculation}${separator}"")`)
     if (rentalTotal >= 0) formulas.set(startColumnIndex + rentalTotal, `=${ifFunction}(${angelMarked}${separator}${sharedCalculation}${separator}${componentSum})`)
@@ -58,9 +63,9 @@ export function getRentalFormulaCells(headers: string[], startColumnIndex: numbe
 
   if (total >= 0 && rentalTotal >= 0 && purchases >= 0) {
     const purchasesValue = halfPurchases >= 0
-      ? `${ifFunction}(${orFunction}(${ref(halfPurchases)}="SI"${separator}${ref(halfPurchases)}="SÍ")${separator}${ref(purchases)}/2${separator}${ref(purchases)})`
-      : ref(purchases)
-    formulas.set(startColumnIndex + total, `=${ref(rentalTotal)}+${purchasesValue}`)
+      ? `${ifFunction}(${orFunction}(${ref(halfPurchases)}="SI"${separator}${ref(halfPurchases)}="SÍ")${separator}${numeric(purchases)}/2${separator}${numeric(purchases)})`
+      : numeric(purchases)
+    formulas.set(startColumnIndex + total, `=${numeric(rentalTotal)}+${purchasesValue}`)
   }
 
   return formulas

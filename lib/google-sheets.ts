@@ -122,6 +122,7 @@ export async function getRentalSpreadsheet() {
   return {
     file: { id: file.id, name: file.name ?? 'Alquiler Google Sheets', url: file.webViewLink ?? null },
     locale: spreadsheet.data.properties?.locale ?? 'es',
+    sheetCount: tabs.length,
     years,
   }
 }

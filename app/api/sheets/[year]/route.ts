@@ -1,19 +1,25 @@
 import { NextResponse } from 'next/server'
 import { getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
-import { getRentalFormulaCells, isCalculatedRentalHeader, toA1Column } from '@/lib/rental-sheet'
+import { getRentalFormulaCells, isCalculatedRentalHeader, isPaymentStatusHeader, toA1Column } from '@/lib/rental-sheet'
 
 function isCellValueArray(value: unknown): value is Array<string | number | boolean> {
   return Array.isArray(value) && value.every((item) => ['string', 'number', 'boolean'].includes(typeof item))
 }
 
-function rowCells(values: Array<string | number | boolean>, headers: string[], startColumnIndex: number, rowNumber: number, locale: string) {
+function rowCells(values: Array<string | number | boolean>, headers: string[], startColumnIndex: number, rowNumber: number, locale: string, blackText = false) {
   const formulas = getRentalFormulaCells(headers, startColumnIndex, rowNumber, locale)
   return values.map((value, index) => {
     const formula = formulas.get(startColumnIndex + index)
-    if (formula) return { userEnteredValue: { formulaValue: formula } }
-    if (typeof value === 'string') return { userEnteredValue: { stringValue: value } }
-    if (typeof value === 'number') return { userEnteredValue: { numberValue: value } }
-    return { userEnteredValue: { boolValue: value } }
+    const cell = formula
+      ? { userEnteredValue: { formulaValue: formula } }
+      : typeof value === 'string'
+        ? { userEnteredValue: { stringValue: value } }
+        : typeof value === 'number'
+          ? { userEnteredValue: { numberValue: value } }
+          : { userEnteredValue: { boolValue: value } }
+    return blackText
+      ? { ...cell, userEnteredFormat: { textFormat: { foregroundColor: { red: 0, green: 0, blue: 0 } } } }
+      : cell
   })
 }
 
@@ -56,10 +62,55 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
     const firstColumn = toA1Column(tab.startColumnIndex)
     const lastColumn = toA1Column(tab.startColumnIndex + tab.headers.length - 1)
 
-    const body = await request.json() as { action?: string; rowNumber?: number; values?: unknown[] }
+    const body = await request.json() as { action?: string; rowNumber?: number; values?: unknown[]; status?: string }
     const { sheets } = await import('@/lib/google-sheets').then(({ getGoogleClients }) => getGoogleClients())
     let writtenRowNumber: number | undefined
-    if (body.action === 'delete') {
+    if (body.action === 'payment-status') {
+      if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) {
+        return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
+      }
+      if (!tab.rows.some((row) => row.rowNumber === body.rowNumber)) {
+        return NextResponse.json({ error: 'No se encontró el registro seleccionado' }, { status: 404 })
+      }
+      if (body.status !== 'PAGADO' && body.status !== 'PENDIENTE') {
+        return NextResponse.json({ error: 'El estado de pago no es válido' }, { status: 400 })
+      }
+      const currentStatusIndex = tab.headers.findIndex(isPaymentStatusHeader)
+      const statusColumn = tab.startColumnIndex + (currentStatusIndex >= 0 ? currentStatusIndex : tab.headers.length)
+      const requests = []
+      if (currentStatusIndex < 0) {
+        requests.push({
+          updateCells: {
+            range: {
+              sheetId: tab.sheetId,
+              startRowIndex: tab.headerRowNumber - 1,
+              endRowIndex: tab.headerRowNumber,
+              startColumnIndex: statusColumn,
+              endColumnIndex: statusColumn + 1,
+            },
+            rows: [{ values: [{ userEnteredValue: { stringValue: 'PAGADO' } }] }],
+            fields: 'userEnteredValue',
+          },
+        })
+      }
+      requests.push({
+        updateCells: {
+          range: {
+            sheetId: tab.sheetId,
+            startRowIndex: body.rowNumber! - 1,
+            endRowIndex: body.rowNumber!,
+            startColumnIndex: statusColumn,
+            endColumnIndex: statusColumn + 1,
+          },
+          rows: [{ values: [{ userEnteredValue: { stringValue: body.status } }] }],
+          fields: 'userEnteredValue',
+        },
+      })
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: spreadsheet.file.id,
+        requestBody: { requests },
+      })
+    } else if (body.action === 'delete') {
       if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: spreadsheet.file.id,
@@ -94,8 +145,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
                   startColumnIndex: tab.startColumnIndex,
                   endColumnIndex: tab.startColumnIndex + tab.headers.length,
                 },
-                rows: [{ values: rowCells(values, tab.headers, tab.startColumnIndex, rowNumber, spreadsheet.locale) }],
-                fields: 'userEnteredValue',
+                rows: [{ values: rowCells(values, tab.headers, tab.startColumnIndex, rowNumber, spreadsheet.locale, true) }],
+                fields: 'userEnteredValue,userEnteredFormat.textFormat.foregroundColor',
               },
             }],
           },

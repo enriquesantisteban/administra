@@ -19,12 +19,35 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     await getSignedInUser()
-    const body = await request.json() as { action?: string; templateYear?: string }
-    if (body.action !== 'create-year') return NextResponse.json({ error: 'Acción no válida' }, { status: 400 })
+    const body = await request.json() as { action?: string; templateYear?: string; year?: string }
+    if (body.action !== 'create-year' && body.action !== 'delete-year') {
+      return NextResponse.json({ error: 'Acción no válida' }, { status: 400 })
+    }
 
     const spreadsheet = await getRentalSpreadsheet()
-    if (!spreadsheet.file.id || !spreadsheet.years.length) {
-      return NextResponse.json({ error: 'No hay una hoja anual que se pueda copiar' }, { status: 409 })
+    if (!spreadsheet.file.id) return NextResponse.json({ error: 'No se encontró el archivo de Google Sheets' }, { status: 409 })
+    if (!spreadsheet.years.length) return NextResponse.json({ error: 'No hay hojas anuales disponibles' }, { status: 409 })
+
+    if (body.action === 'delete-year') {
+      if (!body.year || !/^\d{4}$/.test(body.year)) {
+        return NextResponse.json({ error: 'Selecciona un año válido para eliminar' }, { status: 400 })
+      }
+      if (spreadsheet.years.length <= 1) {
+        return NextResponse.json({ error: 'No se puede eliminar el único año disponible' }, { status: 409 })
+      }
+      const target = spreadsheet.years.find((item) => item.year === body.year)
+      if (!target) return NextResponse.json({ error: 'No se encontró la hoja anual seleccionada' }, { status: 404 })
+
+      const { sheets } = await getGoogleClients()
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: spreadsheet.file.id,
+        requestBody: { requests: [{ deleteSheet: { sheetId: target.sheetId } }] },
+      })
+      const updatedSpreadsheet = await getRentalSpreadsheet()
+      if (updatedSpreadsheet.years.some((item) => item.year === body.year)) {
+        throw new Error('DELETED_YEAR_STILL_EXISTS')
+      }
+      return NextResponse.json({ year: body.year })
     }
 
     if (!body.templateYear || !/^\d{4}$/.test(body.templateYear)) {
@@ -39,7 +62,13 @@ export async function POST(request: Request) {
     const duplicate = await sheets.spreadsheets.batchUpdate({
       spreadsheetId: spreadsheet.file.id,
       requestBody: {
-        requests: [{ duplicateSheet: { sourceSheetId: template.sheetId, newSheetName: year } }],
+        requests: [{
+          duplicateSheet: {
+            sourceSheetId: template.sheetId,
+            insertSheetIndex: spreadsheet.sheetCount,
+            newSheetName: `Alquiler_${year}`,
+          },
+        }],
       },
     })
     const sheetId = duplicate.data.replies?.[0]?.duplicateSheet?.properties?.sheetId
@@ -78,9 +107,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
     }
     const details = getGoogleSheetsErrorDetails(error)
-    console.error('Google Sheets year creation failed', { status: details.status, code: details.code, providerMessage: details.providerMessage })
+    console.error('Google Sheets year management failed', { status: details.status, code: details.code, providerMessage: details.providerMessage })
     const message = error instanceof Error && error.message === 'CREATED_YEAR_NOT_FOUND'
       ? 'Google no confirmó la creación de la nueva hoja. Actualiza los datos y vuelve a intentarlo.'
+      : error instanceof Error && error.message === 'DELETED_YEAR_STILL_EXISTS'
+        ? 'Google no confirmó la eliminación de la hoja. Actualiza los datos y vuelve a intentarlo.'
       : details.providerMessage
         ? `Google Sheets: ${details.providerMessage}`
         : details.message
