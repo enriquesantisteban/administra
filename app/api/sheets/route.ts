@@ -74,6 +74,38 @@ export async function POST(request: Request) {
     })
     const sheetId = duplicate.data.replies?.[0]?.duplicateSheet?.properties?.sheetId
     if (typeof sheetId !== 'number') throw new Error('DUPLICATED_SHEET_ID_NOT_RETURNED')
+    const yearLabelValues = await sheets.spreadsheets.values.get({
+      spreadsheetId: spreadsheet.file.id,
+      range: `'${template.title.replaceAll("'", "''")}'!A3:Z4`,
+      valueRenderOption: 'UNFORMATTED_VALUE',
+    })
+    const yearLabelRequests = (yearLabelValues.data.values ?? []).flatMap((row, rowIndex) =>
+      row.flatMap((value, columnIndex) => {
+        if (String(value ?? '').trim() !== template.year) return []
+        const userEnteredValue = typeof value === 'number'
+          ? { numberValue: Number(year) }
+          : { stringValue: year }
+        return [{
+          updateCells: {
+            range: {
+              sheetId,
+              startRowIndex: rowIndex + 2,
+              endRowIndex: rowIndex + 3,
+              startColumnIndex: columnIndex,
+              endColumnIndex: columnIndex + 1,
+            },
+            rows: [{ values: [{ userEnteredValue }] }],
+            fields: 'userEnteredValue',
+          },
+        }]
+      }),
+    )
+    if (yearLabelRequests.length) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: spreadsheet.file.id,
+        requestBody: { requests: yearLabelRequests },
+      })
+    }
 
     const tableName = `Alquiler_${year}`
     const tableMetadata = await sheets.spreadsheets.get({

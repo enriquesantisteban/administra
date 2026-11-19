@@ -38,7 +38,7 @@ export function getRentalCurrencyFormatRequests(sheetId: number, headers: string
     return [{
       repeatCell: {
         range,
-        cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY' as const, pattern: '#,##0.00 €' } } },
+        cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY' as const, pattern: '#,##0.00 ' + String.fromCharCode(8364) } } },
         fields: 'userEnteredFormat.numberFormat',
       },
     }]
