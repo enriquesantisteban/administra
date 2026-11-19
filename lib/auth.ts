@@ -7,9 +7,10 @@ const baseURL =
     : process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : process.env.V0_RUNTIME_URL ?? 'http://localhost:3000')
+const secret = process.env.BETTER_AUTH_SECRET?.trim() || process.env.AUTH_SECRET?.trim()
 
 export const auth = betterAuth({
-  secret: process.env.AUTH_SECRET ?? process.env.BETTER_AUTH_SECRET,
+  secret,
   baseURL,
   socialProviders: {
     google: {
