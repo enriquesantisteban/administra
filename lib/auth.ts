@@ -1,21 +1,31 @@
 import { betterAuth } from 'better-auth'
-import { pool } from '@/lib/db'
+
+const baseURL =
+  process.env.BETTER_AUTH_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : process.env.V0_RUNTIME_URL ?? 'http://localhost:3000')
 
 export const auth = betterAuth({
-  database: pool,
   secret: process.env.AUTH_SECRET ?? process.env.BETTER_AUTH_SECRET,
-  baseURL:
-    process.env.BETTER_AUTH_URL ??
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : process.env.V0_RUNTIME_URL),
-  emailAndPassword: { enabled: true, autoSignIn: true },
+  baseURL,
   socialProviders: {
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    },
+  },
+  user: {
+    validateUserInfo: ({ user }) => {
+      const authorizedEmail = process.env.AUTHORIZED_EMAIL?.trim().toLowerCase()
+      if (authorizedEmail && user.email?.trim().toLowerCase() !== authorizedEmail) {
+        return {
+          error: 'email_not_allowed',
+          errorDescription: 'Esta cuenta de Google no está autorizada.',
+        }
+      }
     },
   },
   trustedOrigins: [
@@ -37,12 +47,16 @@ export const auth = betterAuth({
         ]
       : []),
   ],
-  session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
-  ...(process.env.NODE_ENV === 'development'
-    ? {
-        advanced: {
-          defaultCookieAttributes: { sameSite: 'none' as const, secure: true },
-        },
-      }
-    : {}),
+  session: {
+    cookieCache: {
+      enabled: true,
+      maxAge: 60 * 60 * 24 * 7,
+      strategy: 'jwe',
+      refreshCache: true,
+    },
+  },
+  account: {
+    storeStateStrategy: 'cookie',
+    storeAccountCookie: true,
+  },
 })
