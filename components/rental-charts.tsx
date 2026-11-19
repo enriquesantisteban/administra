@@ -2,6 +2,7 @@
 
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { RentalYear } from '@/components/dashboard'
+import { normalizeSheetHeader } from '@/lib/rental-sheet'
 
 const COLORS = ['#284d3b', '#97b59d', '#d8a46d', '#8d9da2', '#d9cdb8', '#c4d6ca']
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -13,7 +14,7 @@ const CATEGORIES = [
   { name: 'Basura', header: /^BASURA$/ },
   { name: 'Compras', header: /^COMPRAS$/ },
 ]
-const euro = (value: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(value)
+const euro = (value: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
 
 function amount(value: unknown) {
   if (typeof value === 'number') return value
@@ -24,9 +25,8 @@ function amount(value: unknown) {
 
 function isEnabled(value: unknown) {
   if (typeof value === 'boolean') return value
-  return ['si', 'sí', 'true', 'yes', '1'].includes(String(value ?? '').trim().toLocaleLowerCase('es'))
+  return ['SI', 'TRUE', 'YES', '1'].includes(normalizeSheetHeader(value))
 }
-
 function columnIndex(headers: string[], matcher: RegExp) {
   return headers.findIndex((header) => matcher.test(header.trim().toUpperCase()))
 }
@@ -58,15 +58,18 @@ export function RentalCharts({ years, selectedYear }: { years: RentalYear[]; sel
     })
 
   const sharedIndex = columnIndex(selectedYear.headers, /^A MEDIAS$/)
+  const angelIndex = selectedYear.headers.findIndex((header) => normalizeSheetHeader(header) === 'CON ANGEL')
   const categoryData = CATEGORIES.map(({ name, header }) => {
     const index = columnIndex(selectedYear.headers, header)
     const total = selectedYear.rows.reduce((sum, row) => {
-      const value = amount(row.values[index])
-      return sum + (name === 'Compras' && isEnabled(row.values[sharedIndex]) ? value / 2 : value)
+      let value = amount(row.values[index])
+      if (name === 'Alquiler' && isEnabled(row.values[angelIndex])) value -= 175
+      if (name === 'Luz' || name === 'Agua' || name === 'Basura') value *= 2 / 3
+      if (name === 'Compras' && isEnabled(row.values[sharedIndex])) value /= 2
+      return sum + value
     }, 0)
     return { concept: name, amount: total }
   })
-
   const hasSelectedRows = selectedYear.rows.length > 0
 
   return (

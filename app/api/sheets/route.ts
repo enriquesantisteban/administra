@@ -149,7 +149,13 @@ export async function POST(request: Request) {
       })
     }
 
-    if (tableEndRowIndex > template.headerRowNumber) {
+    const lastDataRow = template.rows.reduce((last, row) => Math.max(last, row.rowNumber), template.headerRowNumber)
+    const tableBodyEndRowIndex = Math.max(tableEndRowIndex, lastDataRow)
+    if (tableBodyEndRowIndex > template.headerRowNumber) {
+      await sheets.spreadsheets.values.clear({
+        spreadsheetId: spreadsheet.file.id,
+        range: `'${year}'!A${template.headerRowNumber + 1}:Z${tableBodyEndRowIndex}`,
+      })
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: spreadsheet.file.id,
         requestBody: {
@@ -159,7 +165,7 @@ export async function POST(request: Request) {
                 sheetId,
                 dimension: 'ROWS',
                 startIndex: template.headerRowNumber,
-                endIndex: tableEndRowIndex,
+                endIndex: tableBodyEndRowIndex,
               },
             },
           }],
@@ -167,6 +173,33 @@ export async function POST(request: Request) {
       })
     }
 
+    const tableAfterClearMetadata = await sheets.spreadsheets.get({
+      spreadsheetId: spreadsheet.file.id,
+      fields: 'tables(tableId,name,range,columnProperties)',
+    })
+    const emptyTable = getGoogleSheetTables(tableAfterClearMetadata.data).find((table) => table.range?.sheetId === sheetId)
+    if (emptyTable?.tableId) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: spreadsheet.file.id,
+        requestBody: {
+          requests: [{
+            updateTable: {
+              table: {
+                tableId: emptyTable.tableId,
+                range: {
+                  sheetId,
+                  startRowIndex: template.headerRowNumber - 1,
+                  endRowIndex: template.headerRowNumber,
+                  startColumnIndex: template.startColumnIndex,
+                  endColumnIndex: template.startColumnIndex + template.headers.length,
+                },
+              },
+              fields: 'range',
+            },
+          }],
+        },
+      })
+    }
     const currencyFormatRequests = spreadsheet.years.flatMap((item) =>
       getRentalCurrencyFormatRequests(item.sheetId, item.headers, item.startColumnIndex, item.headerRowNumber),
     )
