@@ -68,7 +68,7 @@ export async function getGoogleClients() {
 
 export type GoogleSheetTable = {
   tableId?: string | null
-  range?: { sheetId?: number | null; startColumnIndex?: number | null; endColumnIndex?: number | null } | null
+  range?: { sheetId?: number | null; startRowIndex?: number | null; endRowIndex?: number | null; startColumnIndex?: number | null; endColumnIndex?: number | null } | null
   columnProperties?: Array<{ columnIndex?: number | null; columnName?: string | null }> | null
 }
 

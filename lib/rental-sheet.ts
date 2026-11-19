@@ -16,6 +16,34 @@ export function isPaymentStatusHeader(header: string) {
   return normalizeSheetHeader(header) === 'PAGADO'
 }
 
+const RENTAL_CURRENCY_HEADERS = new Set([
+  'TOTAL ALQUILER CON ANGEL',
+  'TOTAL ALQUILER',
+  'TOTAL',
+  'AGUA',
+  'LUZ',
+  'BASURA',
+])
+
+export function getRentalCurrencyFormatRequests(sheetId: number, headers: string[], startColumnIndex: number, startRowIndex: number, endRowIndex?: number) {
+  return headers.flatMap((header, index) => {
+    if (!RENTAL_CURRENCY_HEADERS.has(normalizeSheetHeader(header))) return []
+    const range: { sheetId: number; startRowIndex: number; endRowIndex?: number; startColumnIndex: number; endColumnIndex: number } = {
+      sheetId,
+      startRowIndex,
+      startColumnIndex: startColumnIndex + index,
+      endColumnIndex: startColumnIndex + index + 1,
+    }
+    if (endRowIndex !== undefined) range.endRowIndex = endRowIndex
+    return [{
+      repeatCell: {
+        range,
+        cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY' as const, pattern: '#,##0.00 €' } } },
+        fields: 'userEnteredFormat.numberFormat',
+      },
+    }]
+  })
+}
 export function toA1Column(index: number) {
   let number = index + 1
   let column = ''

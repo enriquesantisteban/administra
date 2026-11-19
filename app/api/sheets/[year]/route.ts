@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getGoogleSheetTables, getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
-import { getRentalFormulaCells, isCalculatedRentalHeader, isPaymentStatusHeader, toA1Column } from '@/lib/rental-sheet'
+import { getRentalCurrencyFormatRequests, getRentalFormulaCells, isCalculatedRentalHeader, isPaymentStatusHeader, toA1Column } from '@/lib/rental-sheet'
 
 function isCellValueArray(value: unknown): value is Array<string | number | boolean> {
   return Array.isArray(value) && value.every((item) => ['string', 'number', 'boolean'].includes(typeof item))
@@ -205,10 +205,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
       const rowNumbers = new Set(tab.rows.map((row) => row.rowNumber))
       rowNumbers.add(writtenRowNumber)
       const formulaRequests = formulaCellRequests(tab.sheetId, tab.headers, tab.startColumnIndex, [...rowNumbers], spreadsheet.locale)
-      if (formulaRequests.length) {
+      const currencyFormatRequests = getRentalCurrencyFormatRequests(tab.sheetId, tab.headers, tab.startColumnIndex, writtenRowNumber - 1, writtenRowNumber)
+      if (formulaRequests.length || currencyFormatRequests.length) {
         await sheets.spreadsheets.batchUpdate({
           spreadsheetId: spreadsheet.file.id,
-          requestBody: { requests: formulaRequests },
+          requestBody: { requests: [...formulaRequests, ...currencyFormatRequests] },
         })
       }
     }

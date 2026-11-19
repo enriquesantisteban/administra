@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getGoogleClients, getGoogleSheetTables, getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
+import { getRentalCurrencyFormatRequests } from '@/lib/rental-sheet'
 
 export async function GET() {
   try {
@@ -80,6 +81,7 @@ export async function POST(request: Request) {
       fields: 'tables(tableId,name,range,columnProperties)',
     })
     const copiedTable = getGoogleSheetTables(tableMetadata.data).find((table) => table.range?.sheetId === sheetId)
+    const tableEndRowIndex = copiedTable?.range?.endRowIndex ?? template.headerRowNumber + 1
     if (copiedTable?.tableId) {
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: spreadsheet.file.id,
@@ -115,14 +117,31 @@ export async function POST(request: Request) {
       })
     }
 
-    const lastDataRow = template.rows.reduce((last, row) => Math.max(last, row.rowNumber), template.headerRowNumber)
-    if (lastDataRow > template.headerRowNumber) {
-      await sheets.spreadsheets.values.clear({
+    if (tableEndRowIndex > template.headerRowNumber) {
+      await sheets.spreadsheets.batchUpdate({
         spreadsheetId: spreadsheet.file.id,
-        range: `'${year}'!A${template.headerRowNumber + 1}:Z${lastDataRow}`,
+        requestBody: {
+          requests: [{
+            deleteDimension: {
+              range: {
+                sheetId,
+                dimension: 'ROWS',
+                startIndex: template.headerRowNumber,
+                endIndex: tableEndRowIndex,
+              },
+            },
+          }],
+        },
       })
     }
 
+    const currencyFormatRequests = spreadsheet.years.flatMap((item) =>
+      getRentalCurrencyFormatRequests(item.sheetId, item.headers, item.startColumnIndex, item.headerRowNumber),
+    )
+    currencyFormatRequests.push(...getRentalCurrencyFormatRequests(sheetId, template.headers, template.startColumnIndex, template.headerRowNumber))
+    if (currencyFormatRequests.length) {
+      await sheets.spreadsheets.batchUpdate({ spreadsheetId: spreadsheet.file.id, requestBody: { requests: currencyFormatRequests } })
+    }
     const newYearRows = (await getRentalSpreadsheet()).years.find((item) => item.year === year)?.rows ?? []
     if (newYearRows.length) throw new Error('CREATED_YEAR_CONTAINS_TEMPLATE_ROWS')
     const createdSpreadsheet = await getRentalSpreadsheet()
