@@ -3,6 +3,7 @@ import 'server-only'
 import { google } from 'googleapis'
 import { auth } from '@/lib/auth'
 import { headers } from 'next/headers'
+import { normalizeSheetHeader } from '@/lib/rental-sheet'
 
 export function getGoogleSheetsErrorDetails(error: unknown) {
   const message = error instanceof Error ? error.message : ''
@@ -93,7 +94,7 @@ export async function getRentalSpreadsheet() {
       }).then((result) => {
         const values = result.data.values ?? []
         const headerIndex = values.findIndex((row) => {
-          const headers = row.map((value) => String(value ?? '').trim().toUpperCase())
+          const headers = row.map(normalizeSheetHeader)
           return headers.includes('MESES') && headers.includes('ALQUILER') && headers.includes('TOTAL')
         })
         if (headerIndex < 0) throw new Error('SHEET_HEADERS_NOT_FOUND')
@@ -107,6 +108,7 @@ export async function getRentalSpreadsheet() {
           year,
           title,
           sheetId: tab.properties?.sheetId ?? 0,
+          headerRowNumber: headerIndex + 1,
           startColumnIndex,
           headers,
           rows: values.slice(headerIndex + 1).map((row, index) => ({

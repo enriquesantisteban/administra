@@ -5,9 +5,10 @@ import useSWR from 'swr'
 import { authClient } from '@/lib/auth-client'
 import { ArrowDownRight, ArrowRight, Check, ChevronDown, CircleHelp, Cloud, FileSpreadsheet, House, LayoutDashboard, LoaderCircle, LogOut, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, TrendingUp, Wallet, X } from 'lucide-react'
 import { RentalCharts } from '@/components/rental-charts'
+import { isCalculatedRentalHeader, RENTAL_MONTHS } from '@/lib/rental-sheet'
 
 export type RentalRow = { rowNumber: number; values: unknown[] }
-export type RentalYear = { year: string; title: string; sheetId: number; startColumnIndex: number; headers: string[]; rows: RentalRow[] }
+export type RentalYear = { year: string; title: string; sheetId: number; headerRowNumber: number; startColumnIndex: number; headers: string[]; rows: RentalRow[] }
 type Data = { file: { id: string; name: string; url: string | null } | null; years: RentalYear[]; error?: string }
 type Props = { user: { name: string; email: string } }
 const fetcher = async (url: string): Promise<Data> => {
@@ -41,15 +42,33 @@ function dateText(value: unknown) {
   const date = new Date(String(value))
   return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
 }
+function calendarDate(value: string) {
+  const normalized = value.trim()
+  const iso = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (iso) return normalized
+  const spanish = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (spanish) return `${spanish[3]}-${spanish[2].padStart(2, '0')}-${spanish[1].padStart(2, '0')}`
+  const parsed = new Date(normalized)
+  return Number.isNaN(parsed.valueOf()) ? '' : parsed.toISOString().slice(0, 10)
+}
+function dateRangeParts(value: unknown): [string, string] {
+  const parts = String(value ?? '').split(/\s+[-–—]\s+/, 2)
+  return [calendarDate(parts[0] ?? ''), calendarDate(parts[1] ?? '')]
+}
+function sheetDate(value: string) {
+  if (!value) return ''
+  const [year, month, day] = value.split('-')
+  return `${day}/${month}/${year}`
+}
+function dateRangeValue(start: string, end: string) {
+  if (start && end) return `${sheetDate(start)} - ${sheetDate(end)}`
+  return sheetDate(start || end)
+}
 function asInput(value: unknown, header: string) {
   if (isBooleanHeader(header) || typeof value === 'boolean') return booleanValue(value)
   if (/FECHA/i.test(header) && typeof value === 'number') {
     const date = new Date(Date.UTC(1899, 11, 30) + value * 86400000)
     return date.toISOString().slice(0, 10)
-  }
-  if (/FECHA/i.test(header) && value) {
-    const date = new Date(String(value))
-    if (!Number.isNaN(date.valueOf())) return date.toISOString().slice(0, 10)
   }
   return value == null ? '' : String(value)
 }
@@ -60,12 +79,15 @@ function RentalEditor({ year, headers, initialRow, onClose, onSave }: { year: st
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   function update(index: number, value: string | boolean) { setValues((current) => current.map((item, itemIndex) => itemIndex === index ? value : item)) }
+  function updateDateRange(index: number, start: string, end: string) { update(index, dateRangeValue(start, end)) }
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setSaving(true)
     setError('')
     const normalized = values.map((value, index) => {
       const header = headers[index]
+      if (isCalculatedRentalHeader(header)) return ''
       if (isBooleanHeader(header)) return Boolean(value) ? 'SÍ' : 'NO'
       if (typeof value === 'boolean') return value
       if (/FECHA/i.test(header)) return value || ''
@@ -75,11 +97,66 @@ function RentalEditor({ year, headers, initialRow, onClose, onSave }: { year: st
     })
     try { await onSave(normalized) } catch (caught) { setError(caught instanceof Error ? caught.message : 'No se han podido guardar los cambios'); setSaving(false) }
   }
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="edit-modal" role="dialog" aria-modal="true" aria-labelledby="editor-title"><div className="modal-heading"><div><span className="eyebrow">ALQUILER · {year}</span><h2 id="editor-title">{initialRow ? 'Editar registro' : 'Añadir registro'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar"><X size={18} /></button></div><form onSubmit={submit}><div className="form-grid">{headers.map((header, index) => {
-    const isBoolean = isBooleanHeader(header) || typeof initialRow?.values[index] === 'boolean'
-    const isDate = /FECHA/i.test(header)
-    return <label className={`field-label ${isBoolean ? 'field-check' : ''}`} key={header}>{isBoolean ? <><input type="checkbox" checked={Boolean(values[index])} onChange={(event) => update(index, event.target.checked)} /><span>{header}</span></> : <>{header}<input type="text" inputMode={isDate || /MESES?/i.test(header) ? 'text' : 'decimal'} value={String(values[index])} onChange={(event) => update(index, event.target.value)} placeholder={isDate ? 'dd/mm/aaaa o intervalo' : /MESES?/i.test(header) ? 'Enero' : '0,00'} /></>}</label>
-  })}</div>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="button-quiet" onClick={onClose}>Cancelar</button><button className="button-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar cambios'}<Check size={16} /></button></div></form></section></div>
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <section className="edit-modal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+        <div className="modal-heading">
+          <div><span className="eyebrow">ALQUILER · {year}</span><h2 id="editor-title">{initialRow ? 'Editar registro' : 'Añadir registro'}</h2></div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar"><X size={18} /></button>
+        </div>
+        <form onSubmit={submit}>
+          <div className="form-grid">
+            {headers.map((header, index) => {
+              const isBoolean = isBooleanHeader(header) || typeof initialRow?.values[index] === 'boolean'
+              const isCalculated = isCalculatedRentalHeader(header)
+              const isDate = /FECHA/i.test(header)
+              const isMonth = /^(MESES?)$/i.test(header.trim())
+              const monthValue = RENTAL_MONTHS.find((month) => month.toLocaleLowerCase('es') === String(values[index] ?? '').trim().toLocaleLowerCase('es')) ?? ''
+              const [dateStart, dateEnd] = isDate ? dateRangeParts(values[index]) : ['', '']
+
+              return (
+                <label className={`field-label ${isBoolean ? 'field-check' : ''}`} key={`${header}-${index}`}>
+                  {isBoolean ? (
+                    <><input type="checkbox" checked={Boolean(values[index])} onChange={(event) => update(index, event.target.checked)} /><span>{header}</span></>
+                  ) : (
+                    <>
+                      {header}
+                      {isMonth ? (
+                        <select value={monthValue} onChange={(event) => update(index, event.target.value)}>
+                          <option value="">Selecciona un mes</option>
+                          {RENTAL_MONTHS.map((month) => <option key={month} value={month}>{month}</option>)}
+                        </select>
+                      ) : isDate ? (
+                        <div className="date-range-fields">
+                          <input type="date" aria-label={`${header} inicio`} value={dateStart} onChange={(event) => updateDateRange(index, event.target.value, dateEnd)} />
+                          <span>a</span>
+                          <input type="date" aria-label={`${header} fin`} value={dateEnd} onChange={(event) => updateDateRange(index, dateStart, event.target.value)} />
+                        </div>
+                      ) : (
+                        <input
+                          type="text"
+                          inputMode={isCalculated || isBoolean ? 'text' : 'decimal'}
+                          readOnly={isCalculated}
+                          value={String(values[index] ?? '')}
+                          onChange={(event) => update(index, event.target.value)}
+                          placeholder={isCalculated ? 'Se calcula al guardar' : '0,00'}
+                        />
+                      )}
+                    </>
+                  )}
+                </label>
+              )
+            })}
+          </div>
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <div className="modal-actions">
+            <button type="button" className="button-quiet" onClick={onClose}>Cancelar</button>
+            <button className="button-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar cambios'}<Check size={16} /></button>
+          </div>
+        </form>
+      </section>
+    </div>
+  )
 }
 
 export function Dashboard({ user }: Props) {
@@ -88,6 +165,7 @@ export function Dashboard({ user }: Props) {
   const [search, setSearch] = useState('')
   const [editor, setEditor] = useState<RentalRow | null | undefined>(undefined)
   const [toast, setToast] = useState('')
+  const [creatingYear, setCreatingYear] = useState(false)
   const years = useMemo(() => [...(data?.years ?? [])].sort((a, b) => b.year.localeCompare(a.year)), [data?.years])
   const selectedYear = years.find((item) => item.year === activeYear) ?? years[0]
   const visibleRows = useMemo(() => (selectedYear?.rows ?? []).filter((row) => !search || row.values.some((value) => String(value).toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es')))), [search, selectedYear])
@@ -96,6 +174,30 @@ export function Dashboard({ user }: Props) {
   const selectedTotal = selectedYear ? selectedYear.rows.reduce((sum, row) => sum + numberValue(row.values[indexOf(selectedYear.headers, /^TOTAL$/)]), 0) : 0
   const average = monthCount ? selectedTotal / monthCount : 0
   const initials = user.name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'F'
+
+  async function createNextYear() {
+    if (!years.length || creatingYear) return
+    const nextYear = String(Number(years[0].year) + 1)
+    if (!window.confirm(`¿Crear la hoja ${nextYear} copiando la estructura del ${years[0].year}, sin sus datos?`)) return
+    setCreatingYear(true)
+    try {
+      const response = await fetch('/api/sheets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create-year' }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error ?? 'No se pudo crear el año')
+      await mutate()
+      setActiveYear(result.year)
+      setToast(`Hoja ${result.year} creada`)
+      window.setTimeout(() => setToast(''), 3200)
+    } catch (caught) {
+      setToast(caught instanceof Error ? caught.message : 'No se pudo crear el año')
+    } finally {
+      setCreatingYear(false)
+    }
+  }
 
   async function save(values: unknown[]) {
     if (!selectedYear) throw new Error('Selecciona un año antes de guardar')
@@ -127,7 +229,7 @@ export function Dashboard({ user }: Props) {
       {error ? <section className="connect-banner error-banner"><div className="connect-art"><CircleHelp size={24} /></div><div className="connect-copy"><span className="eyebrow">CONEXIÓN INTERRUMPIDA</span><h2>No se han podido cargar los datos</h2><p>{error.message}</p></div><button className="button-quiet" onClick={() => mutate()}><RefreshCw size={16} />Reintentar</button></section> : !isLoading && data && !data.file ? <section className="connect-banner"><div className="connect-art"><Search size={24} /></div><div className="connect-copy"><span className="eyebrow">NO ENCONTRAMOS LA HOJA</span><h2>Revisa la configuración de Google Sheets</h2><p>Comprueba que GOOGLE_SHEET_ID es correcto y que compartiste la hoja con GOOGLE_SERVICE_ACCOUNT_EMAIL con permiso de editor.</p></div><button className="button-quiet" onClick={() => mutate()}><RefreshCw size={16} />Volver a buscar</button></section> : null}
       <section className="stats-grid" aria-label="Resumen de gastos"><article className="stat-card stat-featured"><div className="stat-top"><span>GASTO ACUMULADO</span><span className="stat-icon"><Wallet size={17} /></span></div><strong className="stat-value">{isLoading ? '—' : euro(annualTotal)}</strong><div className="stat-foot"><span className="stat-year-chip">{years.length} {years.length === 1 ? 'año' : 'años'} de histórico</span><span className="stat-foot-label">en total</span></div><div className="stat-watermark">€</div></article><article className="stat-card"><div className="stat-top"><span>GASTO EN {selectedYear?.year ?? '—'}</span><span className="stat-icon stat-icon-muted"><House size={17} /></span></div><strong className="stat-value">{isLoading ? '—' : euro(selectedTotal)}</strong><div className="stat-foot"><span className="stat-indicator"><ArrowDownRight size={13} />{monthCount} registros</span><span className="stat-foot-label">este año</span></div></article><article className="stat-card"><div className="stat-top"><span>PROMEDIO MENSUAL</span><span className="stat-icon stat-icon-muted"><TrendingUp size={17} /></span></div><strong className="stat-value">{isLoading ? '—' : euro(average)}</strong><div className="stat-foot"><span className="stat-foot-label">basado en los registros de</span><span className="stat-year-chip">{selectedYear?.year ?? '—'}</span></div></article></section>
       <div id="graficas">{years.length > 0 && <RentalCharts years={years} />}</div>
-      <section className="panel records-panel" id="registros"><div className="records-heading"><div><span className="eyebrow">TU HISTÓRICO</span><h2>Registros de alquiler</h2></div><div className="records-tools"><label className="search-box"><Search size={16} /><span className="sr-only">Buscar registros</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar…" /></label><button className="year-pill" onClick={() => setActiveYear(selectedYear?.year ?? '')}>{selectedYear?.year ?? 'Año'}<ChevronDown size={14} /></button><button className="button-primary button-add-small" onClick={() => setEditor(null)} disabled={!selectedYear}><Plus size={16} /><span>Nuevo</span></button></div></div><div className="table-container">{isLoading ? <div className="table-state"><LoaderCircle className="spin" size={20} />Cargando tus registros…</div> : !selectedYear ? <div className="table-state">Conecta Google Sheets para ver el histórico de alquileres.</div> : visibleRows.length === 0 ? <div className="table-state">{search ? 'No encontramos registros con esa búsqueda.' : 'Todavía no hay registros en esta hoja.'}</div> : <table><thead><tr>{selectedYear.headers.map((header) => <th key={header}>{header}</th>)}<th><span className="sr-only">Acciones</span></th></tr></thead><tbody>{visibleRows.map((row) => <tr key={`${selectedYear.year}-${row.rowNumber}`}>{selectedYear.headers.map((header, index) => { const value = row.values[index]; const isMonth = /^MESES?$/i.test(header.trim()); const isDate = /^FECHA/i.test(header.trim()); const isBoolean = isBooleanHeader(header); const isMoney = /^(ALQUILER|LUZ|AGUA|BASURA|TOTAL|COMPRAS)/i.test(header.trim()); return <td key={`${header}-${index}`}>{isMonth ? <><span className="month-cell">{String(value || 'Sin mes')}</span><span className="row-year">{selectedYear.year}</span></> : isBoolean ? <span className={`boolean-chip ${booleanValue(value) ? 'boolean-yes' : ''}`}>{booleanValue(value) ? 'Sí' : 'No'}</span> : typeof value === 'boolean' ? <span className={`boolean-chip ${value ? 'boolean-yes' : ''}`}>{value ? 'Sí' : 'No'}</span> : isDate ? dateText(value) : isMoney ? <span className={/^TOTAL$/i.test(header.trim()) ? 'total-cell' : undefined}>{amountText(value)}</span> : String(value ?? '—')}</td> })}<td><div className="row-actions"><button aria-label={`Editar ${row.values[monthIndex] ?? 'registro'}`} onClick={() => setEditor(row)}><Settings2 size={15} /></button><button aria-label={`Eliminar ${row.values[monthIndex] ?? 'registro'}`} onClick={() => deleteRow(row)}><Trash2 size={15} /></button></div></td></tr>)}</tbody></table>}</div><div className="table-footer"><span>{visibleRows.length} {visibleRows.length === 1 ? 'registro' : 'registros'}{search ? ' encontrados' : ` · ${selectedYear?.year ?? ''}`}</span><span className="footer-sheet"><span className="status-dot" />Sincronizado con Google Sheets <button onClick={() => mutate()} aria-label="Actualizar datos"><RefreshCw size={13} /></button></span></div></section>
+      <section className="panel records-panel" id="registros"><div className="records-heading"><div><span className="eyebrow">TU HISTÓRICO</span><h2>Registros de alquiler</h2></div><div className="records-tools"><label className="search-box"><Search size={16} /><span className="sr-only">Buscar registros</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar…" /></label><label className="year-pill year-pill-select"><span className="sr-only">Año del histórico</span><select value={selectedYear?.year ?? ''} onChange={(event) => setActiveYear(event.target.value)} disabled={!years.length}>{years.map((year) => <option key={year.year} value={year.year}>{year.year}</option>)}</select><ChevronDown size={14} /></label><button className="button-quiet year-create-button" onClick={createNextYear} disabled={!years.length || creatingYear}><Plus size={14} />{creatingYear ? 'Creando…' : 'Nuevo año'}</button><button className="button-primary button-add-small" onClick={() => setEditor(null)} disabled={!selectedYear}><Plus size={16} /><span>Nuevo</span></button></div></div><div className="table-container">{isLoading ? <div className="table-state"><LoaderCircle className="spin" size={20} />Cargando tus registros…</div> : !selectedYear ? <div className="table-state">Conecta Google Sheets para ver el histórico de alquileres.</div> : visibleRows.length === 0 ? <div className="table-state">{search ? 'No encontramos registros con esa búsqueda.' : 'Todavía no hay registros en esta hoja.'}</div> : <table><thead><tr>{selectedYear.headers.map((header) => <th key={header}>{header}</th>)}<th><span className="sr-only">Acciones</span></th></tr></thead><tbody>{visibleRows.map((row) => <tr key={`${selectedYear.year}-${row.rowNumber}`}>{selectedYear.headers.map((header, index) => { const value = row.values[index]; const isMonth = /^MESES?$/i.test(header.trim()); const isDate = /^FECHA/i.test(header.trim()); const isBoolean = isBooleanHeader(header); const isMoney = /^(ALQUILER|LUZ|AGUA|BASURA|TOTAL|COMPRAS)/i.test(header.trim()); return <td key={`${header}-${index}`}>{isMonth ? <><span className="month-cell">{String(value || 'Sin mes')}</span><span className="row-year">{selectedYear.year}</span></> : isBoolean ? <span className={`boolean-chip ${booleanValue(value) ? 'boolean-yes' : ''}`}>{booleanValue(value) ? 'Sí' : 'No'}</span> : typeof value === 'boolean' ? <span className={`boolean-chip ${value ? 'boolean-yes' : ''}`}>{value ? 'Sí' : 'No'}</span> : isDate ? dateText(value) : isMoney ? <span className={/^TOTAL$/i.test(header.trim()) ? 'total-cell' : undefined}>{amountText(value)}</span> : String(value ?? '—')}</td> })}<td><div className="row-actions"><button aria-label={`Editar ${row.values[monthIndex] ?? 'registro'}`} onClick={() => setEditor(row)}><Settings2 size={15} /></button><button aria-label={`Eliminar ${row.values[monthIndex] ?? 'registro'}`} onClick={() => deleteRow(row)}><Trash2 size={15} /></button></div></td></tr>)}</tbody></table>}</div><div className="table-footer"><span>{visibleRows.length} {visibleRows.length === 1 ? 'registro' : 'registros'}{search ? ' encontrados' : ` · ${selectedYear?.year ?? ''}`}</span><span className="footer-sheet"><span className="status-dot" />Sincronizado con Google Sheets <button onClick={() => mutate()} aria-label="Actualizar datos"><RefreshCw size={13} /></button></span></div></section>
       <footer className="dashboard-footer"><span>ADMINISTRA <i>·</i> TU CASA EN ORDEN</span><span><ShieldCheck size={14} /> Tus datos permanecen en tu cuenta de Google</span></footer></div></div>
     {editor !== undefined && selectedYear && <RentalEditor year={selectedYear.year} headers={selectedYear.headers} initialRow={editor} onClose={() => setEditor(undefined)} onSave={save} />}
     {toast && <div className="toast" role="status"><Check size={16} />{toast}<button onClick={() => setToast('')} aria-label="Cerrar notificación"><X size={15} /></button></div>}

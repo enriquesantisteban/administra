@@ -21,3 +21,5 @@ Después de añadir o cambiar variables en Vercel, vuelve a desplegar la aplicac
 ## Formato de las hojas
 
 Se leen pestañas cuyo nombre sea un año (por ejemplo, `2017`) o `Alquiler_2017`. La fila de cabeceras se detecta automáticamente buscando `MESES`, `ALQUILER` y `TOTAL`; puede empezar en una columna distinta de A. Las columnas adicionales de 2026, como `CON ÁNGEL` y `A MEDIAS`, se muestran según aparezcan en la hoja.
+
+Desde el histórico se puede crear el año siguiente. La aplicación duplica la última pestaña para conservar su formato, mantiene los meses y vuelve a generar las fórmulas, dejando vacíos los datos del año anterior. Los campos `TOTAL ALQUILER`, `TOTAL ALQUILER CON ÁNGEL` y `TOTAL` se calculan al guardar; para los años con `CON ÁNGEL`, el total con Ángel solo se muestra cuando está marcado.

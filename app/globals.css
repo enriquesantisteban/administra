@@ -173,6 +173,10 @@ a { color: inherit; text-decoration: none; }
 .search-box input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; color: #354138; background: transparent; font-size: 10px; }
 .search-box input::placeholder { color: #a2a69f; }
 .year-pill { height: 32px; display: inline-flex; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid #e8ebe5; border-radius: 7px; color: #616b61; background: #fff; font-size: 10px; }
+.year-pill-select { position: relative; padding-right: 26px; }
+.year-pill-select select { width: 43px; height: 30px; padding: 0; appearance: none; border: 0; outline: 0; color: inherit; background: transparent; font-size: inherit; cursor: pointer; }
+.year-pill-select svg { position: absolute; right: 8px; pointer-events: none; }
+.year-create-button { min-height: 32px; gap: 5px; padding: 0 9px; font-size: 10px; }
 .button-add-small { min-height: 32px; padding: 0 10px; border-radius: 7px; font-size: 10px; }
 .table-container { width: 100%; overflow-x: auto; }
 table { width: 100%; min-width: 920px; border-collapse: collapse; text-align: left; white-space: nowrap; }
@@ -209,6 +213,10 @@ tbody tr:hover { background: #fbfcfa; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
 .field-label { display: grid; gap: 7px; color: #606a60; font-size: 10px; font-weight: 600; }
 .field-label input:not([type=checkbox]) { width: 100%; height: 38px; padding: 0 11px; border: 1px solid #e4e8e2; border-radius: 7px; outline: none; color: #344238; background: #fff; font-size: 11px; font-weight: 400; }
+.field-label select { width: 100%; height: 38px; padding: 0 11px; border: 1px solid #e4e8e2; border-radius: 7px; outline: none; color: #344238; background: #fff; font-size: 11px; font-weight: 400; }
+.field-label input[readonly] { color: #707970; background: #f7f8f6; cursor: not-allowed; }
+.date-range-fields { display: flex; align-items: center; gap: 6px; color: #858b83; font-size: 10px; font-weight: 400; }
+.date-range-fields input[type=date] { width: 0; min-width: 0; flex: 1; padding: 0 6px !important; font-size: 10px !important; }
 .field-label input:focus { border-color: #89a28d; box-shadow: 0 0 0 3px #89a28d20; }
 .field-check { display: flex; align-items: center; gap: 9px; align-self: end; min-height: 38px; padding: 0 11px; border: 1px solid #e4e8e2; border-radius: 7px; background: #fafbf9; }
 .field-check input { width: 15px; height: 15px; accent-color: #355a46; }
@@ -306,8 +314,8 @@ tbody tr:hover { background: #fbfcfa; }
   .chart-annual { min-height: 190px; }
   .chart-area-short { height: 116px; }
   .records-heading { align-items: flex-start; flex-direction: column; padding: 15px 13px 12px; }
-  .records-tools { width: 100%; }
-  .search-box { flex: 1; }
+  .records-tools { width: 100%; flex-wrap: wrap; }
+  .search-box { flex: 1; min-width: 120px; }
   .table-container table { min-width: 920px; }
   .table-footer { padding: 0 12px; font-size: 8px; }
   .footer-sheet { gap: 5px; }
@@ -336,6 +344,7 @@ tbody tr:hover { background: #fbfcfa; }
   .welcome-actions .button-quiet { padding: 0 9px; }
   .button-primary { padding: 0 10px; }
   .records-tools { gap: 5px; }
+  .search-box { flex: 1 1 100%; }
   .button-add-small { padding: 0 8px; }
   .year-pill { padding: 0 7px; }
   .form-grid { grid-template-columns: 1fr; }

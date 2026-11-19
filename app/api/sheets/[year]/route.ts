@@ -1,15 +1,20 @@
 import { NextResponse } from 'next/server'
 import { getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
+import { getRentalFormulaCells, isCalculatedRentalHeader, toA1Column } from '@/lib/rental-sheet'
 
-function columnName(index: number) {
-  let number = index + 1
-  let name = ''
-  while (number > 0) {
-    const remainder = (number - 1) % 26
-    name = String.fromCharCode(65 + remainder) + name
-    number = Math.floor((number - 1) / 26)
-  }
-  return name
+function isCellValueArray(value: unknown): value is Array<string | number | boolean> {
+  return Array.isArray(value) && value.every((item) => ['string', 'number', 'boolean'].includes(typeof item))
+}
+
+function rowCells(values: Array<string | number | boolean>, headers: string[], startColumnIndex: number, rowNumber: number) {
+  const formulas = getRentalFormulaCells(headers, startColumnIndex, rowNumber)
+  return values.map((value, index) => {
+    const formula = formulas.get(startColumnIndex + index)
+    if (formula) return { userEnteredValue: { formulaValue: formula } }
+    if (typeof value === 'string') return { userEnteredValue: { stringValue: value } }
+    if (typeof value === 'number') return { userEnteredValue: { numberValue: value } }
+    return { userEnteredValue: { boolValue: value } }
+  })
 }
 
 const respondToError = (error: unknown) => {
@@ -28,35 +33,70 @@ export async function POST(request: Request, { params }: { params: Promise<{ yea
     const tab = spreadsheet?.years.find((item) => item.year === year)
     if (!spreadsheet?.file.id || !tab) return NextResponse.json({ error: 'No se encuentra la hoja de ese año' }, { status: 404 })
     const sheetRange = `'${tab.title.replaceAll("'", "''")}'!`
-    const firstColumn = columnName(tab.startColumnIndex)
-    const lastColumn = columnName(tab.startColumnIndex + tab.headers.length - 1)
+    const firstColumn = toA1Column(tab.startColumnIndex)
+    const lastColumn = toA1Column(tab.startColumnIndex + tab.headers.length - 1)
 
     const body = await request.json() as { action?: string; rowNumber?: number; values?: unknown[] }
     const { sheets } = await import('@/lib/google-sheets').then(({ getGoogleClients }) => getGoogleClients())
     if (body.action === 'delete') {
-      if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) < 2) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
+      if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: spreadsheet.file.id,
         requestBody: { requests: [{ deleteDimension: { range: { sheetId: tab.sheetId, dimension: 'ROWS', startIndex: body.rowNumber! - 1, endIndex: body.rowNumber! } } }] },
       })
     } else if (body.action === 'add' || body.action === 'update') {
-      if (!Array.isArray(body.values) || body.values.length !== tab.headers.length) return NextResponse.json({ error: 'La fila no coincide con las columnas de la hoja' }, { status: 400 })
-      if (body.values.some((value) => !['string', 'number', 'boolean'].includes(typeof value))) return NextResponse.json({ error: 'La fila contiene datos no válidos' }, { status: 400 })
+      const values = body.values
+      if (!isCellValueArray(values) || values.length !== tab.headers.length) return NextResponse.json({ error: 'La fila no coincide con las columnas de la hoja o contiene datos no válidos' }, { status: 400 })
       if (body.action === 'add') {
-        await sheets.spreadsheets.values.append({
+        const appendValues = values.map((value, index) => isCalculatedRentalHeader(tab.headers[index]) ? '' : value)
+        const appended = await sheets.spreadsheets.values.append({
           spreadsheetId: spreadsheet.file.id,
           range: `${sheetRange}${firstColumn}:${lastColumn}`,
-          valueInputOption: 'USER_ENTERED',
+          valueInputOption: 'RAW',
           insertDataOption: 'INSERT_ROWS',
-          requestBody: { values: [body.values as (string | number | boolean)[]] },
+          requestBody: { values: [appendValues] },
+        })
+        const updatedRange = appended.data.updates?.updatedRange
+        const startCell = updatedRange?.slice((updatedRange.lastIndexOf('!') + 1)).split(':')[0]
+        const rowNumber = Number(startCell?.match(/\d+$/)?.[0])
+        if (!Number.isInteger(rowNumber) || rowNumber <= tab.headerRowNumber) throw new Error('APPENDED_ROW_NOT_RETURNED')
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId: spreadsheet.file.id,
+          requestBody: {
+            requests: [{
+              updateCells: {
+                range: {
+                  sheetId: tab.sheetId,
+                  startRowIndex: rowNumber - 1,
+                  endRowIndex: rowNumber,
+                  startColumnIndex: tab.startColumnIndex,
+                  endColumnIndex: tab.startColumnIndex + tab.headers.length,
+                },
+                rows: [{ values: rowCells(values, tab.headers, tab.startColumnIndex, rowNumber) }],
+                fields: 'userEnteredValue',
+              },
+            }],
+          },
         })
       } else {
-        if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) < 2) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
-        await sheets.spreadsheets.values.update({
+        if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) <= tab.headerRowNumber) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
+        await sheets.spreadsheets.batchUpdate({
           spreadsheetId: spreadsheet.file.id,
-          range: `${sheetRange}${firstColumn}${body.rowNumber}:${lastColumn}${body.rowNumber}`,
-          valueInputOption: 'USER_ENTERED',
-          requestBody: { values: [body.values as (string | number | boolean)[]] },
+          requestBody: {
+            requests: [{
+              updateCells: {
+                range: {
+                  sheetId: tab.sheetId,
+                  startRowIndex: body.rowNumber! - 1,
+                  endRowIndex: body.rowNumber!,
+                  startColumnIndex: tab.startColumnIndex,
+                  endColumnIndex: tab.startColumnIndex + tab.headers.length,
+                },
+                rows: [{ values: rowCells(values, tab.headers, tab.startColumnIndex, body.rowNumber!) }],
+                fields: 'userEnteredValue',
+              },
+            }],
+          },
         })
       }
     } else {
