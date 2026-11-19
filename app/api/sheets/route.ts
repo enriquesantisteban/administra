@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getGoogleClients, getGoogleSheetTables, getGoogleSheetsErrorDetails, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
-import { getRentalCurrencyFormatRequests, isPaymentStatusHeader, normalizeSheetHeader, RENTAL_MONTHS } from '@/lib/rental-sheet'
+import { getRentalCurrencyFormatRequests } from '@/lib/rental-sheet'
 
 export async function GET() {
   try {
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   try {
     await getSignedInUser()
     const body = await request.json() as { action?: string; templateYear?: string; year?: string }
-    if (body.action !== 'create-year' && body.action !== 'delete-year' && body.action !== 'set-payment-history') {
+    if (body.action !== 'create-year' && body.action !== 'delete-year') {
       return NextResponse.json({ error: 'Acción no válida' }, { status: 400 })
     }
 
@@ -51,61 +51,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ year: body.year })
     }
 
-    if (body.action === 'set-payment-history') {
-      const { sheets } = await getGoogleClients()
-      let paidCount = 0
-      let pendingCount = 0
-      for (const annualSheet of spreadsheet.years) {
-        const monthColumn = annualSheet.headers.findIndex((header) => ['MES', 'MESES'].includes(normalizeSheetHeader(header)))
-        const statusIndex = annualSheet.headers.findIndex(isPaymentStatusHeader)
-        const statusColumn = annualSheet.startColumnIndex + (statusIndex >= 0 ? statusIndex : annualSheet.headers.length)
-        const requests = []
-        if (statusIndex < 0) {
-          requests.push({
-            updateCells: {
-              range: {
-                sheetId: annualSheet.sheetId,
-                startRowIndex: annualSheet.headerRowNumber - 1,
-                endRowIndex: annualSheet.headerRowNumber,
-                startColumnIndex: statusColumn,
-                endColumnIndex: statusColumn + 1,
-              },
-              rows: [{ values: [{ userEnteredValue: { stringValue: 'PAGADO' } }] }],
-              fields: 'userEnteredValue',
-            },
-          })
-        }
-        for (const row of annualSheet.rows) {
-          const year = Number(annualSheet.year)
-          const month = normalizeSheetHeader(row.values[monthColumn] ?? '')
-          const monthIndex = RENTAL_MONTHS.findIndex((name) => month.startsWith(normalizeSheetHeader(name)))
-          const isPaid = year < 2026 || (year === 2026 && monthIndex >= 0 && monthIndex <= 10)
-          const status = isPaid ? 'PAGADO' : 'PENDIENTE'
-          if (isPaid) paidCount++
-          else pendingCount++
-          requests.push({
-            updateCells: {
-              range: {
-                sheetId: annualSheet.sheetId,
-                startRowIndex: row.rowNumber - 1,
-                endRowIndex: row.rowNumber,
-                startColumnIndex: statusColumn,
-                endColumnIndex: statusColumn + 1,
-              },
-              rows: [{ values: [{ userEnteredValue: { stringValue: status } }] }],
-              fields: 'userEnteredValue',
-            },
-          })
-        }
-        if (requests.length) {
-          await sheets.spreadsheets.batchUpdate({
-            spreadsheetId: spreadsheet.file.id,
-            requestBody: { requests },
-          })
-        }
-      }
-      return NextResponse.json({ paidCount, pendingCount })
-    }
     if (!body.templateYear || !/^\d{4}$/.test(body.templateYear)) {
       return NextResponse.json({ error: 'Selecciona un año válido como plantilla' }, { status: 400 })
     }
