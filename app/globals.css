@@ -383,7 +383,7 @@ tbody tr:hover { background: #fbfcfa; }
 .expense-tabs button.selected { border-color:#3d7650; color:#315b3c; font-weight:700; }
 .expense-tabs button span { display:inline-grid; min-width:19px; height:19px; place-items:center; border-radius:10px; background:#edf1eb; font-size:10px; }
 .expense-tabs a { margin-left:auto; color:#7d867e; text-decoration:underline; text-underline-offset:3px; }
-.expense-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:13px; margin-bottom:16px; }
+.expense-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:13px; margin-bottom:16px; }
 .expense-stats article { min-height:126px; display:flex; flex-direction:column; justify-content:center; padding:17px 19px; border:1px solid #e6eae4; border-radius:11px; background:#fff; }
 .expense-stats article>span { color:#788179; font-size:11px; font-weight:600; }
 .expense-stats strong { margin:9px 0 5px; color:#30493a; font-family:Georgia,serif; font-size:29px; font-weight:500; letter-spacing:-.5px; }
