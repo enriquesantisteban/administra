@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { authClient } from '@/lib/auth-client'
@@ -35,6 +35,13 @@ export function ExpensesDashboard({ user }: { user: { name: string; email: strin
   const [showYearCreator, setShowYearCreator] = useState(false)
   const [templateYear, setTemplateYear] = useState('')
   const [creatingYear, setCreatingYear] = useState(false)
+  const yearOptions = [...new Set(['2025','2026','2027',...(data?.years.map(y=>y.year) ?? [])])].sort()
+  useEffect(() => {
+    if (data?.years.length && !data.years.some(item => item.year === year)) {
+      const currentYear = String(new Date().getFullYear())
+      setYear(data.years.some(item => item.year === currentYear) ? currentYear : [...data.years].sort((a,b)=>b.year.localeCompare(a.year))[0].year)
+    }
+  }, [data, year])
   const allRows = data?.years.find(y => y.year === year)?.rows ?? []
   const rows = useMemo(() => allRows.filter(r => { const e = split(r); return e.date.startsWith(year) && (month === 'all' || monthsIdx(e.date) === Number(month)) }), [allRows, year, month])
   const totals = rows.reduce((acc, row) => { const part = angelAndMine(row); acc.angel += part.angel; acc.mine += part.mine; return acc }, { angel: 0, mine: 0 })
@@ -69,7 +76,7 @@ export function ExpensesDashboard({ user }: { user: { name: string; email: strin
   const sym = (category: string) => category === 'Alquiler' ? <Home size={16}/> : category === 'Luz' ? <Lightbulb size={16}/> : category === 'Agua' ? <Droplets size={16}/> : category === 'Internet' ? <Wifi size={16}/> : category === 'Compras' ? <ShoppingBag size={16}/> : <Home size={16}/>
   if (error && !data) return <main className="expense-error"><h1>No se han podido actualizar los gastos</h1><p>Inténtalo de nuevo en unos segundos. Tus datos guardados no se han modificado.</p><button onClick={() => mutate()}>Reintentar</button></main>
   return <main className="expense-app">
-    <header className="expense-header"><a className="expense-brand" href="/dashboard"><span className="brand-mark">A</span>Administra<span>.</span></a><div className="expense-filters"><label>Año<select value={year} onChange={e => setYear(e.target.value)}>{[...new Set(['2025','2026','2027',...(data?.years.map(y=>y.year) ?? [])])].sort().map(y=><option key={y}>{y}</option>)}</select></label><label>Mes<select value={month} onChange={e=>setMonth(e.target.value)}><option value="all">Todo el año</option>{months.map((m,i)=><option key={m} value={i}>{m}</option>)}</select></label></div><div className="expense-user">{user.name}<button aria-label="Cerrar sesión" onClick={() => authClient.signOut().then(()=>location.assign('/sign-in'))}><LogOut size={17}/></button></div></header>
+    <header className="expense-header"><a className="expense-brand" href="/dashboard"><span className="brand-mark">A</span>Administra<span>.</span></a><div className="expense-filters"><label>Año<select value={year} onChange={e => setYear(e.target.value)}>{yearOptions.map(y=><option key={y} value={y} disabled={Boolean(data && !data.years.some(item=>item.year===y))}>{y}{data && !data.years.some(item=>item.year===y)?' (sin hoja)':''}</option>)}</select></label><label>Mes<select value={month} onChange={e=>setMonth(e.target.value)}><option value="all">Todo el año</option>{months.map((m,i)=><option key={m} value={i}>{m}</option>)}</select></label></div><div className="expense-user">{user.name}<button aria-label="Cerrar sesión" onClick={() => authClient.signOut().then(()=>location.assign('/sign-in'))}><LogOut size={17}/></button></div></header>
     <div className="expense-wrap"><div className="expense-title"><div><span className="eyebrow">TU HOGAR · {year}</span><h1>{tab === 'home' ? 'Gastos del hogar' : 'Tus gastos'}</h1><p>Control sencillo de los gastos que compartís.</p></div><div className="expense-title-actions"><button className="button-quiet" disabled={!data?.years.length} onClick={()=>{setTemplateYear(data?.years[0]?.year ?? year);setShowYearCreator(true)}}><Plus size={15}/> Nuevo año</button><button className="button-primary" onClick={()=>open(null)}><Plus size={17}/> Añadir gasto</button></div></div>
       <nav className="expense-tabs"><button className={tab==='home'?'selected':''} onClick={()=>setTab('home')}><LayoutDashboard size={16}/>Inicio</button><button className={tab==='expenses'?'selected':''} onClick={()=>setTab('expenses')}><ShoppingBag size={16}/>Gastos <span>{rows.length}</span></button><a href="/dashboard">Alquileres</a></nav>
       <section className="expense-stats"><article><span>Total de tus gastos</span><strong>{money(totals.mine/100)}</strong><small>Tu parte antes de descontar Internet</small></article><article><span>Parte de Ángel</span><strong>{money(totals.angel/100)}</strong><small>Internet que has anotado: {money(internetCents/100)}</small></article><article><span>Total compras</span><strong>{money(purchasesCents/100)}</strong><small>Importe total de las compras</small></article><article className="due-card"><span>Total que tienes que pagar</span><strong>{money(due/100)}</strong><small>Sin Compras ni Internet</small></article></section>

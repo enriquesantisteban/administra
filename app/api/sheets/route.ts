@@ -18,6 +18,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  let candidateYear: string | undefined
   try {
     await getSignedInUser()
     const body = await request.json() as { action?: string; templateYear?: string; year?: string }
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
 
     const latestYear = Math.max(...spreadsheet.years.map((item) => Number(item.year)))
     const year = String(latestYear + 1)
+    candidateYear = year
     const { sheets } = await getGoogleClients()
     const duplicate = await sheets.spreadsheets.batchUpdate({
       spreadsheetId: spreadsheet.file.id,
@@ -81,7 +83,10 @@ export async function POST(request: Request) {
         requestBody: { requests: [{ updateSheetProperties: { properties: { sheetId, gridProperties: { columnCount: 33 } }, fields: 'gridProperties.columnCount' } }] },
       })
     }
-    await sheets.spreadsheets.values.clear({ spreadsheetId: spreadsheet.file.id, range: `'${year}'!AA2:AG` })
+    const lastCopiedExpenseRow = template.expenseValues?.length ?? 1
+    if (lastCopiedExpenseRow >= 2) {
+      await sheets.spreadsheets.values.clear({ spreadsheetId: spreadsheet.file.id, range: `'${year}'!AA2:AG${lastCopiedExpenseRow}` })
+    }
 
     const lastDataRow = template.rows.reduce((last, row) => Math.max(last, row.rowNumber), template.headerRowNumber)
     if (lastDataRow > template.headerRowNumber) {
@@ -199,6 +204,14 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ year })
   } catch (error) {
+    if (candidateYear) {
+      try {
+        const confirmed = await getRentalSpreadsheet(candidateYear)
+        const created = confirmed.years.find((item) => item.year === candidateYear)
+        const hasExpenseData = created?.expenseValues?.slice(1).some(row => row.some(value => value !== '' && value != null))
+        if (created && created.rows.length === 0 && !hasExpenseData) return NextResponse.json({ year: candidateYear })
+      } catch { /* preserve the original creation error if the copied sheet is incomplete */ }
+    }
     if (error instanceof Error && error.message === 'UNAUTHORIZED') {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
     }

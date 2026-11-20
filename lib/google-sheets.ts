@@ -92,8 +92,8 @@ export async function getRentalSpreadsheet(selectedYear?: string) {
   const file = { id: spreadsheetId, name: spreadsheet.data.properties?.title ?? 'Google Sheets', webViewLink: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit` }
   const tabs = spreadsheet.data.sheets ?? []
   const annualTabs = tabs.flatMap(tab => {
-    const title = tab.properties?.title ?? ''
-    const year = title.match(/^(?:Alquiler_)?(\d{4})$/)?.[1]
+    const title = (tab.properties?.title ?? '').trim()
+    const year = title.match(/^(?:ALQUILER_)?(\d{4})$/i)?.[1]
     return year ? [{ tab, title, year, sheetId: tab.properties?.sheetId ?? 0, columnCount: tab.properties?.gridProperties?.columnCount ?? 26 }] : []
   })
   const activeYear = selectedYear ?? (annualTabs.some(tab => tab.year === String(new Date().getFullYear()))
