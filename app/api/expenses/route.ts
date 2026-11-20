@@ -8,10 +8,10 @@ async function ensureExpenseColumns(sheets: Awaited<ReturnType<typeof getGoogleC
   if (count < 33) await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [{ updateSheetProperties: { properties: { sheetId, gridProperties: { columnCount: 33 } }, fields: 'gridProperties.columnCount' } }] } })
 }
 const LEGACY_CATEGORIES = [
-  { category: 'Alquiler', header: 'ALQUILER', shareHeader: '' },
+  { category: 'Alquiler', header: 'ALQUILER', shareHeader: 'CON ANGEL' },
   { category: 'Luz', header: 'LUZ', shareHeader: 'CON ANGEL' },
   { category: 'Agua', header: 'AGUA', shareHeader: 'CON ANGEL' },
-  { category: 'Basura', header: 'BASURA', shareHeader: '' },
+  { category: 'Basura', header: 'BASURA', shareHeader: 'CON ANGEL' },
   { category: 'Compras', header: 'COMPRAS', shareHeader: 'A MEDIAS' },
 ]
 function legacyRows(tab: Awaited<ReturnType<typeof getRentalSpreadsheet>>['years'][number]) {
@@ -45,7 +45,7 @@ function legacyRows(tab: Awaited<ReturnType<typeof getRentalSpreadsheet>>['years
 function validValues(values: unknown, year: string): values is unknown[] {
   if (!Array.isArray(values) || values.length !== 7 || typeof values[0] !== 'string' || !new RegExp(`^${year}-\\d{2}-\\d{2}$`).test(values[0])) return false
   if (typeof values[1] !== 'string' || !cats.includes(values[1]) || typeof values[2] !== 'string' || !/^\d+\.\d{2}$/.test(values[2])) return false
-  if (values[1] === 'Internet' ? values[2] !== '0.00' : Number(values[2]) <= 0) return false
+  if (Number(values[2]) <= 0) return false
   if (typeof values[3] !== 'boolean' || !['Pagado', 'Pendiente'].includes(String(values[6]))) return false
   return true
 }
@@ -133,6 +133,7 @@ export async function POST(request: Request) {
     if (body.action === 'add') {
       if (!validValues(body.values, body.year!)) return NextResponse.json({ error: 'Registro no válido. Revisa el año, la categoría y el importe.' }, { status: 400 })
       const rows = tab.expenseValues ?? []
+      if (body.values[1] === 'Internet' && rows.slice(1).some(row => String(row[0] ?? '').slice(0, 7) === String(body.values![0]).slice(0, 7) && normalizeSheetHeader(row[1]) === 'INTERNET')) return NextResponse.json({ error: 'Ya hay un registro de Internet para ese mes.' }, { status: 409 })
       let rowNumber = Math.max(2, rows.length + 1)
       for (let i = 1; i < rows.length; i++) if (!rows[i]?.some(value => value !== '' && value != null)) { rowNumber = i + 1; break }
       await sheets.spreadsheets.values.update({ spreadsheetId: base.file.id, range: `${range}AA${rowNumber}:AG${rowNumber}`, valueInputOption: 'RAW', requestBody: { values: [body.values] } })

@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Acción no válida' }, { status: 400 })
     }
 
-    const spreadsheet = await getRentalSpreadsheet()
+    const spreadsheet = await getRentalSpreadsheet(body.templateYear ?? body.year)
     if (!spreadsheet.file.id) return NextResponse.json({ error: 'No se encontró el archivo de Google Sheets' }, { status: 409 })
     if (!spreadsheet.years.length) return NextResponse.json({ error: 'No hay hojas anuales disponibles' }, { status: 409 })
 
@@ -74,6 +74,14 @@ export async function POST(request: Request) {
     })
     const sheetId = duplicate.data.replies?.[0]?.duplicateSheet?.properties?.sheetId
     if (typeof sheetId !== 'number') throw new Error('DUPLICATED_SHEET_ID_NOT_RETURNED')
+
+    if (template.columnCount < 33) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: spreadsheet.file.id,
+        requestBody: { requests: [{ updateSheetProperties: { properties: { sheetId, gridProperties: { columnCount: 33 } }, fields: 'gridProperties.columnCount' } }] },
+      })
+    }
+    await sheets.spreadsheets.values.clear({ spreadsheetId: spreadsheet.file.id, range: `'${year}'!AA2:AG` })
 
     const lastDataRow = template.rows.reduce((last, row) => Math.max(last, row.rowNumber), template.headerRowNumber)
     if (lastDataRow > template.headerRowNumber) {
@@ -183,9 +191,9 @@ export async function POST(request: Request) {
     if (currencyFormatRequests.length) {
       await sheets.spreadsheets.batchUpdate({ spreadsheetId: spreadsheet.file.id, requestBody: { requests: currencyFormatRequests } })
     }
-    const newYearRows = (await getRentalSpreadsheet()).years.find((item) => item.year === year)?.rows ?? []
+    const createdSpreadsheet = await getRentalSpreadsheet(year)
+    const newYearRows = createdSpreadsheet.years.find((item) => item.year === year)?.rows ?? []
     if (newYearRows.length) throw new Error('CREATED_YEAR_CONTAINS_TEMPLATE_ROWS')
-    const createdSpreadsheet = await getRentalSpreadsheet()
     if (!createdSpreadsheet.years.some((item) => item.year === year)) {
       throw new Error('CREATED_YEAR_NOT_FOUND')
     }
