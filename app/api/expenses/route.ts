@@ -1,9 +1,17 @@
 import { NextResponse } from 'next/server'
 import { getGoogleClients, getRentalSpreadsheet, getSignedInUser } from '@/lib/google-sheets'
-import { normalizeSheetHeader, toA1Column } from '@/lib/rental-sheet'
+import { getRentalCurrencyFormatRequests, getRentalFormulaCells, isCalculatedRentalHeader, isPaymentStatusHeader, normalizeSheetHeader, toA1Column } from '@/lib/rental-sheet'
 
 const HEADERS = ['Fecha', 'Categoría', 'Importe', 'Compartido', 'Periodo inicio', 'Periodo fin', 'Estado']
 const cats = ['Alquiler', 'Luz', 'Agua', 'Internet', 'Basura', 'Compras']
+const MONTH_LABELS = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE']
+const monthOf = (value: unknown) => { const match = /^(\d{4})-(\d{2})/.exec(String(value ?? '')); return match ? `${match[1]}-${match[2]}` : '' }
+function amountCents(value: unknown) {
+  if (typeof value === 'number') return Math.round(value * 100)
+  const text = String(value ?? '').trim().replace(/[€\s]/g, '')
+  const amount = Number(text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text)
+  return Number.isFinite(amount) ? Math.round(amount * 100) : 0
+}
 async function ensureExpenseColumns(sheets: Awaited<ReturnType<typeof getGoogleClients>>['sheets'], spreadsheetId: string, sheetId: number, count: number) {
   if (count < 33) await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [{ updateSheetProperties: { properties: { sheetId, gridProperties: { columnCount: 33 } }, fields: 'gridProperties.columnCount' } }] } })
 }
@@ -14,7 +22,7 @@ const LEGACY_CATEGORIES = [
   { category: 'Basura', header: 'BASURA', shareHeader: 'CON ANGEL' },
   { category: 'Compras', header: 'COMPRAS', shareHeader: 'A MEDIAS' },
 ]
-function legacyRows(tab: Awaited<ReturnType<typeof getRentalSpreadsheet>>['years'][number]) {
+function legacyRows(tab: Awaited<ReturnType<typeof getRentalSpreadsheet>>['years'][number], expenseValues: unknown[][] = []) {
   const find = (name: string) => tab.headers.findIndex(header => normalizeSheetHeader(header) === name)
   const monthColumn = find('MESES') >= 0 ? find('MESES') : find('MES')
   const statusColumn = tab.headers.findIndex(header => ['ESTADO', 'PAGADO'].includes(normalizeSheetHeader(header)))
@@ -34,13 +42,65 @@ function legacyRows(tab: Awaited<ReturnType<typeof getRentalSpreadsheet>>['years
     const status = String(row.values[statusColumn] ?? '').trim().toLocaleLowerCase('es') === 'pagado' ? 'Pagado' : 'Pendiente'
     return LEGACY_CATEGORIES.flatMap((item, index) => {
       const amountIndex = find(item.header)
-      const amount = amountOf(row.values[amountIndex])
+      const ledgerCents = expenseValues.slice(1).filter(stored => monthOf(stored[0]) === monthOf(date) && normalizeSheetHeader(stored[1]) === normalizeSheetHeader(item.category)).reduce((sum, stored) => sum + amountCents(stored[2]), 0)
+      const amount = amountOf(row.values[amountIndex]) - ledgerCents / 100
       if (amountIndex < 0 || amount <= 0) return []
       const shareIndex = item.shareHeader ? find(item.shareHeader) : -1
       const shared = shareIndex >= 0 && ['SI', 'SÍ', 'TRUE', '1'].includes(normalizeSheetHeader(row.values[shareIndex]))
-      return [{ rowNumber: -(row.rowNumber * 10 + index + 1), legacy: true, values: [date, item.category, amount, shared, '', '', status] }]
+      return [{ rowNumber: -(row.rowNumber * 10 + index + 1), legacy: true, values: [date, item.category, Math.max(0, amount), shared, '', '', status] }]
     })
   })
+}
+function sourceMonthRow(tab: Awaited<ReturnType<typeof getRentalSpreadsheet>>['years'][number], date: string) {
+  const monthIndex = tab.headers.findIndex(header => ['MES', 'MESES'].includes(normalizeSheetHeader(header)))
+  const month = MONTH_LABELS[Number(date.slice(5, 7)) - 1]
+  return tab.rows.find(row => normalizeSheetHeader(row.values[monthIndex]).startsWith(month))
+}
+async function syncSourceCategory(
+  sheets: Awaited<ReturnType<typeof getGoogleClients>>['sheets'], spreadsheetId: string,
+  tab: Awaited<ReturnType<typeof getRentalSpreadsheet>>['years'][number], date: string,
+  category: string, deltaCents: number, shared?: boolean, status?: string, locale = 'es',
+) {
+  const categoryIndex = tab.headers.findIndex(header => normalizeSheetHeader(header) === normalizeSheetHeader(category))
+  if (categoryIndex < 0) return
+  const sheetRange = `'${tab.title.replaceAll("'", "''")}'!`
+  const row = sourceMonthRow(tab, date)
+  if (!row) {
+    if (deltaCents <= 0) return
+    const monthColumn = tab.headers.findIndex(header => ['MES', 'MESES'].includes(normalizeSheetHeader(header)))
+    const values = tab.headers.map((column, index) => {
+      const key = normalizeSheetHeader(column)
+      const shareHeader = category === 'Compras' ? 'A MEDIAS' : ['Alquiler', 'Luz', 'Agua', 'Basura'].includes(category) ? 'CON ANGEL' : ''
+      if (index === monthColumn) return MONTH_LABELS[Number(date.slice(5, 7)) - 1]
+      if (index === categoryIndex) return deltaCents / 100
+      if (shared !== undefined && shareHeader && key === shareHeader) return shared ? 'SÍ' : 'NO'
+      if (isPaymentStatusHeader(column)) return status ?? 'Pendiente'
+      return isCalculatedRentalHeader(column) ? '' : '-'
+    })
+    const lastColumn = toA1Column(tab.startColumnIndex + tab.headers.length - 1)
+    const appended = await sheets.spreadsheets.values.append({ spreadsheetId, range: `${sheetRange}${toA1Column(tab.startColumnIndex)}${tab.headerRowNumber + 1}:${lastColumn}`, valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS', requestBody: { values: [values] } })
+    const updatedRange = appended.data.updates?.updatedRange
+    const startCell = updatedRange?.slice(updatedRange.lastIndexOf('!') + 1).split(':')[0]
+    const rowNumber = Number(startCell?.match(/\d+$/)?.[0])
+    if (!Number.isInteger(rowNumber) || rowNumber <= tab.headerRowNumber) throw new Error('APPENDED_EXPENSE_ROW_NOT_RETURNED')
+    const formulas = getRentalFormulaCells(tab.headers, tab.startColumnIndex, rowNumber, locale)
+    const formulaRequests = [...formulas.entries()].map(([columnIndex, formula]) => ({ updateCells: { range: { sheetId: tab.sheetId, startRowIndex: rowNumber - 1, endRowIndex: rowNumber, startColumnIndex: columnIndex, endColumnIndex: columnIndex + 1 }, rows: [{ values: [{ userEnteredValue: { formulaValue: formula } }] }], fields: 'userEnteredValue' } }))
+    const formats = getRentalCurrencyFormatRequests(tab.sheetId, tab.headers, tab.startColumnIndex, rowNumber - 1, rowNumber)
+    if (formulaRequests.length || formats.length) await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [...formulaRequests, ...formats] } })
+    return
+  }
+  const currentCents = amountCents(row.values[categoryIndex])
+  const data: Array<{ range: string; values: unknown[][] }> = [{ range: `${sheetRange}${toA1Column(tab.startColumnIndex + categoryIndex)}${row.rowNumber}`, values: [[Math.max(0, currentCents + deltaCents) / 100]] }]
+  const header = category === 'Compras' ? 'A MEDIAS' : ['Alquiler', 'Luz', 'Agua', 'Basura'].includes(category) ? 'CON ANGEL' : ''
+  if (shared !== undefined && header) {
+    const index = tab.headers.findIndex(item => normalizeSheetHeader(item) === header)
+    if (index >= 0) data.push({ range: `${sheetRange}${toA1Column(tab.startColumnIndex + index)}${row.rowNumber}`, values: [[shared ? 'SÍ' : 'NO']] })
+  }
+  if (status) {
+    const index = tab.headers.findIndex(isPaymentStatusHeader)
+    if (index >= 0) data.push({ range: `${sheetRange}${toA1Column(tab.startColumnIndex + index)}${row.rowNumber}`, values: [[status]] })
+  }
+  await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: 'RAW', data } })
 }
 function validValues(values: unknown, year: string): values is unknown[] {
   if (!Array.isArray(values) || values.length !== 7 || typeof values[0] !== 'string' || !new RegExp(`^${year}-\\d{2}-\\d{2}$`).test(values[0])) return false
@@ -75,7 +135,7 @@ export async function GET(request: Request) {
         await sheets.spreadsheets.values.update({ spreadsheetId: base.file.id, range: `'${tab.title.replaceAll("'", "''")}'!AA1:AG1`, valueInputOption: 'RAW', requestBody: { values: [HEADERS] } })
       }
       const storedRows = values.slice(1).map((row, index) => ({ rowNumber: index + 2, values: HEADERS.map((_, i) => row[i] ?? '') })).filter(row => row.values.some(v => v !== ''))
-      return { year: tab.year, sheetId: tab.sheetId, rows: [...legacyRows(tab), ...storedRows] }
+      return { year: tab.year, sheetId: tab.sheetId, rows: [...legacyRows(tab, values), ...storedRows] }
     }))
     return NextResponse.json({ years, file: base.file })
   } catch (e) { return respond(e) }
@@ -136,15 +196,33 @@ export async function POST(request: Request) {
       if (body.values[1] === 'Internet' && rows.slice(1).some(row => String(row[0] ?? '').slice(0, 7) === String(body.values![0]).slice(0, 7) && normalizeSheetHeader(row[1]) === 'INTERNET')) return NextResponse.json({ error: 'Ya hay un registro de Internet para ese mes.' }, { status: 409 })
       let rowNumber = Math.max(2, rows.length + 1)
       for (let i = 1; i < rows.length; i++) if (!rows[i]?.some(value => value !== '' && value != null)) { rowNumber = i + 1; break }
+      await syncSourceCategory(sheets, base.file.id, tab, String(body.values[0]), String(body.values[1]), amountCents(body.values[2]), Boolean(body.values[3]), String(body.values[6]), base.locale)
       await sheets.spreadsheets.values.update({ spreadsheetId: base.file.id, range: `${range}AA${rowNumber}:AG${rowNumber}`, valueInputOption: 'RAW', requestBody: { values: [body.values] } })
     } else if (body.action === 'update') {
       if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) < 2 || !validValues(body.values, body.year!)) return NextResponse.json({ error: 'Registro no válido. Revisa el año, la categoría y el importe.' }, { status: 400 })
+      const old = tab.expenseValues?.[(body.rowNumber ?? 2) - 1] ?? []
+      const oldDate = String(old[0] ?? '')
+      const oldCategory = String(old[1] ?? '')
+      const oldAmount = amountCents(old[2])
+      const nextDate = String(body.values[0])
+      const nextCategory = String(body.values[1])
+      const nextAmount = amountCents(body.values[2])
+      if (oldDate && (monthOf(oldDate) !== monthOf(nextDate) || normalizeSheetHeader(oldCategory) !== normalizeSheetHeader(nextCategory))) {
+        await syncSourceCategory(sheets, base.file.id, tab, oldDate, oldCategory, -oldAmount, undefined, undefined, base.locale)
+        await syncSourceCategory(sheets, base.file.id, tab, nextDate, nextCategory, nextAmount, Boolean(body.values[3]), String(body.values[6]), base.locale)
+      } else if (oldDate) {
+        await syncSourceCategory(sheets, base.file.id, tab, nextDate, nextCategory, nextAmount - oldAmount, Boolean(body.values[3]), String(body.values[6]), base.locale)
+      }
       await sheets.spreadsheets.values.update({ spreadsheetId: base.file.id, range: `${range}AA${body.rowNumber}:AG${body.rowNumber}`, valueInputOption: 'RAW', requestBody: { values: [body.values] } })
     } else if (body.action === 'status') {
       if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) < 2 || !['Pagado', 'Pendiente'].includes(body.status ?? '')) return NextResponse.json({ error: 'Estado no válido' }, { status: 400 })
+      const stored = tab.expenseValues?.[(body.rowNumber ?? 2) - 1] ?? []
+      if (stored[0] && stored[1]) await syncSourceCategory(sheets, base.file.id, tab, String(stored[0]), String(stored[1]), 0, undefined, body.status, base.locale)
       await sheets.spreadsheets.values.update({ spreadsheetId: base.file.id, range: `${range}AG${body.rowNumber}`, valueInputOption: 'RAW', requestBody: { values: [[body.status]] } })
     } else if (body.action === 'delete') {
       if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) < 2) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
+      const stored = tab.expenseValues?.[(body.rowNumber ?? 2) - 1] ?? []
+      if (stored[0] && stored[1]) await syncSourceCategory(sheets, base.file.id, tab, String(stored[0]), String(stored[1]), -amountCents(stored[2]), undefined, undefined, base.locale)
       await sheets.spreadsheets.values.clear({ spreadsheetId: base.file.id, range: `${range}AA${body.rowNumber}:AG${body.rowNumber}` })
     } else return NextResponse.json({ error: 'Acción no válida' }, { status: 400 })
     return NextResponse.json({ ok: true })
