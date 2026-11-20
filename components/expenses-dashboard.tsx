@@ -16,7 +16,7 @@ const colors = ['#294d3b','#789b7d','#d4a36b','#617a93','#b9a98c','#87a4a0']
 const money = (n: number) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n)
 const parseAmount = (s: string) => Number(s.trim().includes(',') ? s.trim().replace(/\./g, '').replace(',', '.') : s.trim())
 const fetcher = async (url: string): Promise<Payload> => { const r = await fetch(url, { cache: 'no-store' }); const d = await r.json(); if (!r.ok) throw new Error(d.error); return d }
-const cents = (x: unknown) => { const s = String(x ?? '0').trim().replace(/[€\s]/g, '').replace(/\./g, '').replace(',', '.'); const n = Number(s); return Number.isFinite(n) ? Math.round(n * 100) : 0 }
+const cents = (x: unknown) => { if (typeof x === 'number') return Number.isFinite(x) ? Math.round(x * 100) : 0; const s = String(x ?? '0').trim().replace(/[€\s]/g, ''); const normalized = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s; const n = Number(normalized); return Number.isFinite(n) ? Math.round(n * 100) : 0 }
 const monthsIdx = (date: unknown) => { const d = String(date ?? ''); const m = /^\d{4}-(\d\d)/.exec(d); return m ? Number(m[1]) - 1 : -1 }
 const defaultForm = (): FormData => ({ date: `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(new Date().getDate()).padStart(2,'0')}`, category: 'Alquiler', amount: '', shared: false, start: '', end: '', status: 'Pendiente' })
 function split(row: Expense) { const v = row.values; return { date: String(v[0] ?? ''), category: String(v[1] ?? ''), cents: cents(v[2]), shared: ['true','si','sí','1'].includes(String(v[3]).toLowerCase()), start: String(v[4] ?? ''), end: String(v[5] ?? ''), status: String(v[6] ?? 'Pendiente') } }
