@@ -6,7 +6,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
 import { authClient } from '@/lib/auth-client'
 import { Check, Home, Lightbulb, Plus, Trash2, Pencil, LogOut, LayoutDashboard, ShoppingBag, Droplets, Wifi, ChevronDown } from 'lucide-react'
 
-type Expense = { rowNumber: number; values: unknown[] }
+type Expense = { rowNumber: number; values: unknown[]; legacy?: boolean }
 type YearData = { year: string; sheetId: number; rows: Expense[] }
 type Payload = { years: YearData[]; error?: string }
 type FormData = { date: string; category: string; amount: string; shared: boolean; start: string; end: string; status: string }
@@ -24,8 +24,8 @@ function angelAndMine(row: Expense) { const e = split(row); if (e.category === '
 function expenseForm(row: Expense | null, year: string): FormData { if (!row) return { ...defaultForm(), date: `${year}-01-01` }; const e = split(row); return { date: e.date, category: e.category, amount: (e.cents / 100).toFixed(2).replace('.', ','), shared: e.shared, start: e.start, end: e.end, status: e.status } }
 
 export function ExpensesDashboard({ user }: { user: { name: string; email: string } }) {
-  const { data, error, isLoading, mutate } = useSWR<Payload>('/api/expenses', fetcher)
   const [year, setYear] = useState(String(new Date().getFullYear()))
+  const { data, error, isLoading, mutate } = useSWR<Payload>(`/api/expenses?year=${year}`, fetcher, { revalidateOnFocus: false, revalidateOnReconnect: false, dedupingInterval: 60_000, refreshInterval: 0, shouldRetryOnError: true, errorRetryCount: 3, errorRetryInterval: 15_000 })
   const [month, setMonth] = useState('all')
   const [tab, setTab] = useState<'home'|'expenses'>('home')
   const [editing, setEditing] = useState<Expense | null | undefined>(undefined)
@@ -43,12 +43,12 @@ export function ExpensesDashboard({ user }: { user: { name: string; email: strin
   async function persist(action: string, row?: Expense, status?: string) {
     if (busy) return
     setBusy(true)
-    try { const response = await fetch('/api/expenses', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, year, rowNumber: row?.rowNumber, status, values: action === 'add' || action === 'update' ? [form.date, form.category, form.category === 'Internet' ? '0.00' : parseAmount(form.amount).toFixed(2), form.shared, form.start, form.end, form.status] : undefined }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error); await mutate(); setEditing(undefined) }
+    try { const response = await fetch('/api/expenses', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, year, rowNumber: row?.rowNumber, legacy: row?.legacy, status, values: action === 'add' || action === 'update' ? [form.date, form.category, form.category === 'Internet' ? '0.00' : parseAmount(form.amount).toFixed(2), form.shared, form.start, form.end, form.status] : undefined }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error); await mutate(); setEditing(undefined) }
     catch (e) { window.alert(e instanceof Error ? e.message : 'No se pudo guardar') } finally { setBusy(false) }
   }
   function open(row: Expense | null) { setForm(expenseForm(row, year)); setEditing(row) }
   const sym = (category: string) => category === 'Alquiler' ? <Home size={16}/> : category === 'Luz' ? <Lightbulb size={16}/> : category === 'Agua' ? <Droplets size={16}/> : category === 'Internet' ? <Wifi size={16}/> : category === 'Compras' ? <ShoppingBag size={16}/> : <Home size={16}/>
-  if (error) return <main className="expense-error"><h1>No se han podido cargar los gastos</h1><p>{error.message}</p><button onClick={() => mutate()}>Reintentar</button></main>
+  if (error && !data) return <main className="expense-error"><h1>No se han podido actualizar los gastos</h1><p>Inténtalo de nuevo en unos segundos. Tus datos guardados no se han modificado.</p><button onClick={() => mutate()}>Reintentar</button></main>
   return <main className="expense-app">
     <header className="expense-header"><a className="expense-brand" href="/dashboard"><span className="brand-mark">A</span>Administra<span>.</span></a><div className="expense-filters"><label>Año<select value={year} onChange={e => setYear(e.target.value)}>{[...new Set(['2025','2026','2027',...(data?.years.map(y=>y.year) ?? [])])].sort().map(y=><option key={y}>{y}</option>)}</select></label><label>Mes<select value={month} onChange={e=>setMonth(e.target.value)}><option value="all">Todo el año</option>{months.map((m,i)=><option key={m} value={i}>{m}</option>)}</select></label></div><div className="expense-user">{user.name}<button aria-label="Cerrar sesión" onClick={() => authClient.signOut().then(()=>location.assign('/sign-in'))}><LogOut size={17}/></button></div></header>
     <div className="expense-wrap"><div className="expense-title"><div><span className="eyebrow">TU HOGAR · {year}</span><h1>{tab === 'home' ? 'Gastos del hogar' : 'Tus gastos'}</h1><p>Control sencillo de los gastos que compartís.</p></div><button className="button-primary" onClick={()=>open(null)}><Plus size={17}/> Añadir gasto</button></div>

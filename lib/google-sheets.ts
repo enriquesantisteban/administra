@@ -77,7 +77,7 @@ export function getGoogleSheetTables(data: unknown): GoogleSheetTable[] {
   return data.tables.filter((table): table is GoogleSheetTable => typeof table === 'object' && table !== null)
 }
 
-export async function getRentalSpreadsheet() {
+export async function getRentalSpreadsheet(selectedYear?: string) {
   const configuredSheetId = process.env.GOOGLE_SHEET_ID?.trim()
   if (!configuredSheetId) throw new Error('GOOGLE_SHEET_ID_NOT_CONFIGURED')
   const spreadsheetId = configuredSheetId.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/)?.[1] ?? configuredSheetId
@@ -87,24 +87,36 @@ export async function getRentalSpreadsheet() {
   const { sheets } = await getGoogleClients()
   const spreadsheet = await sheets.spreadsheets.get({
     spreadsheetId,
-    fields: 'spreadsheetId,properties(title,locale),sheets(properties(sheetId,title,index))',
+    fields: 'spreadsheetId,properties(title,locale),sheets(properties(sheetId,title,index,gridProperties(columnCount)))',
   })
   const file = { id: spreadsheetId, name: spreadsheet.data.properties?.title ?? 'Google Sheets', webViewLink: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit` }
   const tabs = spreadsheet.data.sheets ?? []
-  const years = await Promise.all(
-    tabs.flatMap((tab) => {
-      const title = tab.properties?.title ?? ''
-      const year = title.match(/^(?:Alquiler_)?(\d{4})$/)?.[1]
-      if (!year) return []
+  const annualTabs = tabs.flatMap(tab => {
+    const title = tab.properties?.title ?? ''
+    const year = title.match(/^(?:Alquiler_)?(\d{4})$/)?.[1]
+    return year ? [{ tab, title, year, sheetId: tab.properties?.sheetId ?? 0, columnCount: tab.properties?.gridProperties?.columnCount ?? 26 }] : []
+  })
+  const activeYear = selectedYear ?? (annualTabs.some(tab => tab.year === String(new Date().getFullYear()))
+    ? String(new Date().getFullYear())
+    : [...annualTabs].sort((a, b) => b.year.localeCompare(a.year))[0]?.year)
+  const years = await Promise.all(annualTabs.map(async ({ title, year, sheetId, columnCount: initialColumnCount }) => {
+      let columnCount = initialColumnCount
+      if (activeYear && activeYear !== year) return { year, title, sheetId, columnCount, expenseValues: undefined as unknown[][] | undefined, headerRowNumber: 0, startColumnIndex: 0, headers: [] as string[], rows: [] as Array<{ rowNumber: number; values: unknown[] }> }
+      if (columnCount < 33) {
+        await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [{ updateSheetProperties: { properties: { sheetId, gridProperties: { columnCount: 33 } }, fields: 'gridProperties.columnCount' } }] } })
+        columnCount = 33
+      }
       const range = `'${title.replaceAll("'", "''")}'!A:Z`
-      return [sheets.spreadsheets.values.get({
+      const result = await sheets.spreadsheets.values.batchGet({
         spreadsheetId: file.id!,
-        range,
+        ranges: activeYear === year ? [range, `'${title.replaceAll("'", "''")}'!AA:AG`] : [range],
         valueRenderOption: 'UNFORMATTED_VALUE',
         dateTimeRenderOption: 'SERIAL_NUMBER',
-      }).then((result) => {
-        const values = result.data.values ?? []
-        const headerIndex = values.findIndex((row) => {
+      })
+      const valueRanges = result.data.valueRanges ?? []
+      const values = valueRanges[0]?.values ?? []
+      const expenseValues = activeYear === year ? valueRanges[1]?.values ?? [] : undefined
+      const headerIndex = values.findIndex((row) => {
           const headers = row.map(normalizeSheetHeader)
           return headers.includes('MESES') && headers.includes('ALQUILER') && headers.includes('TOTAL')
         })
@@ -116,9 +128,8 @@ export async function getRentalSpreadsheet() {
         const headers = headerRow.slice(startColumnIndex).map((value) => String(value ?? ''))
 
         return {
-          year,
-          title,
-          sheetId: tab.properties?.sheetId ?? 0,
+          year, title, sheetId, columnCount,
+          expenseValues,
           headerRowNumber: headerIndex + 1,
           startColumnIndex,
           headers,
@@ -127,9 +138,8 @@ export async function getRentalSpreadsheet() {
             values: headers.map((_, column) => row[startColumnIndex + column] ?? ''),
           })).filter((row) => row.values.some((value) => value !== '')),
         }
-      })]
-    }),
-  )
+
+    }))
   return {
     file: { id: file.id, name: file.name ?? 'Alquiler Google Sheets', url: file.webViewLink ?? null },
     locale: spreadsheet.data.properties?.locale ?? 'es',
