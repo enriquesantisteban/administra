@@ -12,6 +12,12 @@ function amountCents(value: unknown) {
   const amount = Number(text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text)
   return Number.isFinite(amount) ? Math.round(amount * 100) : 0
 }
+async function setRowTextBlack(sheets: Awaited<ReturnType<typeof getGoogleClients>>['sheets'], spreadsheetId: string, sheetId: number, startColumnIndex: number, endColumnIndex: number, rowNumber: number) {
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: { requests: [{ repeatCell: { range: { sheetId, startRowIndex: rowNumber - 1, endRowIndex: rowNumber, startColumnIndex, endColumnIndex }, cell: { userEnteredFormat: { textFormat: { foregroundColor: { red: 0, green: 0, blue: 0 } } } }, fields: 'userEnteredFormat.textFormat.foregroundColor' } }] },
+  })
+}
 async function ensureExpenseColumns(sheets: Awaited<ReturnType<typeof getGoogleClients>>['sheets'], spreadsheetId: string, sheetId: number, count: number) {
   if (count < 33) await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [{ updateSheetProperties: { properties: { sheetId, gridProperties: { columnCount: 33 } }, fields: 'gridProperties.columnCount' } }] } })
 }
@@ -86,7 +92,8 @@ async function syncSourceCategory(
     const formulas = getRentalFormulaCells(tab.headers, tab.startColumnIndex, rowNumber, locale)
     const formulaRequests = [...formulas.entries()].map(([columnIndex, formula]) => ({ updateCells: { range: { sheetId: tab.sheetId, startRowIndex: rowNumber - 1, endRowIndex: rowNumber, startColumnIndex: columnIndex, endColumnIndex: columnIndex + 1 }, rows: [{ values: [{ userEnteredValue: { formulaValue: formula } }] }], fields: 'userEnteredValue' } }))
     const formats = getRentalCurrencyFormatRequests(tab.sheetId, tab.headers, tab.startColumnIndex, rowNumber - 1, rowNumber)
-    if (formulaRequests.length || formats.length) await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [...formulaRequests, ...formats] } })
+    const blackText = { repeatCell: { range: { sheetId: tab.sheetId, startRowIndex: rowNumber - 1, endRowIndex: rowNumber, startColumnIndex: tab.startColumnIndex, endColumnIndex: tab.startColumnIndex + tab.headers.length }, cell: { userEnteredFormat: { textFormat: { foregroundColor: { red: 0, green: 0, blue: 0 } } } }, fields: 'userEnteredFormat.textFormat.foregroundColor' } }
+    await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [...formulaRequests, ...formats, blackText] } })
     return
   }
   const currentCents = amountCents(row.values[categoryIndex])
@@ -101,6 +108,7 @@ async function syncSourceCategory(
     if (index >= 0) data.push({ range: `${sheetRange}${toA1Column(tab.startColumnIndex + index)}${row.rowNumber}`, values: [[status]] })
   }
   await sheets.spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: 'RAW', data } })
+  await setRowTextBlack(sheets, spreadsheetId, tab.sheetId, tab.startColumnIndex, tab.startColumnIndex + tab.headers.length, row.rowNumber)
 }
 function validValues(values: unknown, year: string): values is unknown[] {
   if (!Array.isArray(values) || values.length !== 7 || typeof values[0] !== 'string' || !new RegExp(`^${year}-\\d{2}-\\d{2}$`).test(values[0])) return false
@@ -188,6 +196,7 @@ export async function POST(request: Request) {
         }
         if (statusColumn >= 0) await sheets.spreadsheets.values.update({ spreadsheetId: base.file.id, range: `${range}${toA1Column(tab.startColumnIndex + statusColumn)}${legacyRowNumber}`, valueInputOption: 'RAW', requestBody: { values: [[body.values[6]]] } })
       } else return NextResponse.json({ error: 'Acción no válida' }, { status: 400 })
+      await setRowTextBlack(sheets, base.file.id, tab.sheetId, tab.startColumnIndex, tab.startColumnIndex + tab.headers.length, legacyRowNumber)
       return NextResponse.json({ ok: true })
     }
     if (body.action === 'add') {
@@ -198,6 +207,7 @@ export async function POST(request: Request) {
       for (let i = 1; i < rows.length; i++) if (!rows[i]?.some(value => value !== '' && value != null)) { rowNumber = i + 1; break }
       await syncSourceCategory(sheets, base.file.id, tab, String(body.values[0]), String(body.values[1]), amountCents(body.values[2]), Boolean(body.values[3]), String(body.values[6]), base.locale)
       await sheets.spreadsheets.values.update({ spreadsheetId: base.file.id, range: `${range}AA${rowNumber}:AG${rowNumber}`, valueInputOption: 'RAW', requestBody: { values: [body.values] } })
+      await setRowTextBlack(sheets, base.file.id, tab.sheetId, 26, 33, rowNumber)
     } else if (body.action === 'update') {
       if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) < 2 || !validValues(body.values, body.year!)) return NextResponse.json({ error: 'Registro no válido. Revisa el año, la categoría y el importe.' }, { status: 400 })
       const old = tab.expenseValues?.[(body.rowNumber ?? 2) - 1] ?? []
@@ -214,11 +224,13 @@ export async function POST(request: Request) {
         await syncSourceCategory(sheets, base.file.id, tab, nextDate, nextCategory, nextAmount - oldAmount, Boolean(body.values[3]), String(body.values[6]), base.locale)
       }
       await sheets.spreadsheets.values.update({ spreadsheetId: base.file.id, range: `${range}AA${body.rowNumber}:AG${body.rowNumber}`, valueInputOption: 'RAW', requestBody: { values: [body.values] } })
+      await setRowTextBlack(sheets, base.file.id, tab.sheetId, 26, 33, body.rowNumber!)
     } else if (body.action === 'status') {
       if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) < 2 || !['Pagado', 'Pendiente'].includes(body.status ?? '')) return NextResponse.json({ error: 'Estado no válido' }, { status: 400 })
       const stored = tab.expenseValues?.[(body.rowNumber ?? 2) - 1] ?? []
       if (stored[0] && stored[1]) await syncSourceCategory(sheets, base.file.id, tab, String(stored[0]), String(stored[1]), 0, undefined, body.status, base.locale)
       await sheets.spreadsheets.values.update({ spreadsheetId: base.file.id, range: `${range}AG${body.rowNumber}`, valueInputOption: 'RAW', requestBody: { values: [[body.status]] } })
+      await setRowTextBlack(sheets, base.file.id, tab.sheetId, 26, 33, body.rowNumber!)
     } else if (body.action === 'delete') {
       if (!Number.isInteger(body.rowNumber) || (body.rowNumber ?? 0) < 2) return NextResponse.json({ error: 'Fila no válida' }, { status: 400 })
       const stored = tab.expenseValues?.[(body.rowNumber ?? 2) - 1] ?? []
