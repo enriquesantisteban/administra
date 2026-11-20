@@ -12,6 +12,11 @@ function amountCents(value: unknown) {
   const amount = Number(text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text)
   return Number.isFinite(amount) ? Math.round(amount * 100) : 0
 }
+function isEnabled(value: unknown) {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value === 1
+  return ['SI', 'TRUE', 'YES', '1', 'VERDADERO'].includes(normalizeSheetHeader(value))
+}
 async function setRowTextBlack(sheets: Awaited<ReturnType<typeof getGoogleClients>>['sheets'], spreadsheetId: string, sheetId: number, startColumnIndex: number, endColumnIndex: number, rowNumber: number) {
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
@@ -52,7 +57,7 @@ function legacyRows(tab: Awaited<ReturnType<typeof getRentalSpreadsheet>>['years
       const amount = amountOf(row.values[amountIndex]) - ledgerCents / 100
       if (amountIndex < 0 || amount <= 0) return []
       const shareIndex = item.shareHeader ? find(item.shareHeader) : -1
-      const shared = shareIndex >= 0 && ['SI', 'SÍ', 'TRUE', '1'].includes(normalizeSheetHeader(row.values[shareIndex]))
+      const shared = shareIndex >= 0 && isEnabled(row.values[shareIndex])
       return [{ rowNumber: -(row.rowNumber * 10 + index + 1), legacy: true, values: [date, item.category, Math.max(0, amount), shared, '', '', status] }]
     })
   })
@@ -99,9 +104,11 @@ async function syncSourceCategory(
   const currentCents = amountCents(row.values[categoryIndex])
   const data: Array<{ range: string; values: unknown[][] }> = [{ range: `${sheetRange}${toA1Column(tab.startColumnIndex + categoryIndex)}${row.rowNumber}`, values: [[Math.max(0, currentCents + deltaCents) / 100]] }]
   const header = category === 'Compras' ? 'A MEDIAS' : ['Alquiler', 'Luz', 'Agua', 'Basura'].includes(category) ? 'CON ANGEL' : ''
-  if (shared !== undefined && header) {
+  // The legacy sheet has one shared checkbox for several categories. Never let an
+  // unshared entry switch that shared flag off for another expense in the same month.
+  if (shared === true && header) {
     const index = tab.headers.findIndex(item => normalizeSheetHeader(item) === header)
-    if (index >= 0) data.push({ range: `${sheetRange}${toA1Column(tab.startColumnIndex + index)}${row.rowNumber}`, values: [[shared ? 'SÍ' : 'NO']] })
+    if (index >= 0) data.push({ range: `${sheetRange}${toA1Column(tab.startColumnIndex + index)}${row.rowNumber}`, values: [['SÍ']] })
   }
   if (status) {
     const index = tab.headers.findIndex(isPaymentStatusHeader)
