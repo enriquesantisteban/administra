@@ -48,11 +48,12 @@ export async function GET(request: Request) {
           const to = format(end)
           return from && to ? `${from} - ${to}` : from || to
         }
-        const sharedTotal = monthExpenses.filter(row => row.se_divide && String(row.concepto).toLocaleLowerCase('es') !== 'compras').reduce((sum,row)=>sum+amount(row.importe),0)
+        const sharedTotal = monthExpenses.filter(row => row.se_divide && String(row.concepto).toLocaleLowerCase('es') !== 'compras').reduce((sum,row)=>sum+amount(row.importe)/Math.max(1, Number(row.dividir_entre ?? rent?.dividir_gastos_entre ?? 1)),0)
+        const sharedGross = monthExpenses.filter(row => row.se_divide && String(row.concepto).toLocaleLowerCase('es') !== 'compras').reduce((sum,row)=>sum+amount(row.importe),0)
         const rentAmount = amount(rent?.importe_alquiler)
         const divisor = Math.max(1, Number(rent?.dividir_gastos_entre ?? 1))
         const contribution = people.reduce((sum,row)=>sum+amount(row.aportacion_alquiler),0)
-        const totalRent = rentAmount - contribution - sharedTotal / divisor
+        const totalRent = rentAmount - contribution - sharedTotal
         const purchase = byCategory('Compras')
         const isHalf = monthExpenses.some(row => String(row.concepto).toLowerCase()==='compras' && row.se_divide)
         const total = totalRent + (isHalf ? purchase / 2 : purchase)
@@ -63,7 +64,7 @@ export async function GET(request: Request) {
         for (const name of names) {
           const roommate = people.find(person => String(person.nombre) === name)
           record[`CON ${name.toLocaleUpperCase('es')}`] = roommate ? 'Sí' : 'No'
-          record[`TOTAL ALQUILER CON ${name.toLocaleUpperCase('es')}`] = roommate ? rentAmount + sharedTotal : 0
+          record[`TOTAL ALQUILER CON ${name.toLocaleUpperCase('es')}`] = roommate ? rentAmount + sharedGross : 0
         }
         rows.push(headers.map(header => record[header] ?? ''))
       }
