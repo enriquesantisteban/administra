@@ -67,6 +67,7 @@ export async function POST(request: Request) {
     const [y, m] = String(date).split('-').map(Number)
     const expenseCompanions = body.expenseCompanions ?? []
     const expenseDivider = Math.max(1, Math.floor(Number(body.expenseDivider) || 1))
+    if (category === 'Alquiler' && (body.companions ?? []).reduce((sum, companion) => sum + Number(companion.contribution), 0) > amount) return NextResponse.json({ error: 'La suma de las aportaciones no puede superar el alquiler' }, { status: 400 })
     if (category === 'Internet' && expenseCompanions.reduce((sum, companion) => sum + Number(companion.contribution ?? 0), 0) > amount) return NextResponse.json({ error: 'La suma de las aportaciones de Internet no puede superar el importe total' }, { status: 400 })
     if (['Luz', 'Agua'].includes(String(category)) && expenseCompanions.length > expenseDivider) return NextResponse.json({ error: 'El número de compañeros no puede superar el divisor' }, { status: 400 })
     let rentalId: number
