@@ -1,0 +1,16 @@
+{
+  "name": "Administra",
+  "short_name": "Administra",
+  "description": "Gestión de gastos del hogar",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f5",
+  "theme_color": "#294d3b",
+  "icons": [
+    {
+      "src": "/apple-icon.png",
+      "sizes": "1408x768",
+      "type": "image/png"
+    }
+  ]
+}

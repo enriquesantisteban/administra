@@ -546,6 +546,15 @@ tbody tr:hover { background: #fbfcfa; }
 @media(prefers-reduced-motion:reduce) { .expense-sidebar { transition:none; } .expense-nav-backdrop { animation:none; } }
 @keyframes expense-fade-in { from { opacity:0; } to { opacity:1; } }
 
+.brand-logo-login { display:block; width:190px; height:auto; padding:5px; border-radius:10px; background:#fff; }
+.expense-sidebar .expense-brand { margin-bottom:25px; }
+.expense-brand-logo { display:block; width:166px; height:auto; object-fit:contain; }
+@media(max-width:760px) {
+  .brand-logo-login { width:142px; }
+  .expense-sidebar .expense-brand { margin-bottom:25px; }
+  .expense-brand-logo { width:158px; }
+}
+
 /* Mobile navigation follows Fiskal's drawer pattern; dashboard content reflows without zooming. */
 .mobile-menu, .mobile-nav-close { display: none; }
 @media (max-width: 760px) {

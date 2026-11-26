@@ -30,7 +30,7 @@ export function AuthForm() {
   return (
     <main className="auth-shell">
       <section className="auth-story">
-        <Link href="/" className="brand brand-on-dark"><span className="brand-mark">A</span><span>Administra<span className="brand-dot">.</span></span></Link>
+        <Link href="/" className="brand brand-on-dark"><img src="/apple-icon.png" alt="Administra" className="brand-logo-login" /></Link>
         <div className="story-copy">
           <span className="eyebrow eyebrow-light">TU TRANQUILIDAD, EN ORDEN</span>
           <h1>El hogar también<br />se lleva en <em>cuentas.</em></h1>

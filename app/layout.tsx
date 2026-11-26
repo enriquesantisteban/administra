@@ -7,13 +7,11 @@ export const metadata: Metadata = {
   description: 'Tu histórico de alquileres y gastos, claro y organizado por año.',
   generator: 'v0.app',
   icons: {
-    icon: [
-      { url: '/icon-light-32x32.png', media: '(prefers-color-scheme: light)' },
-      { url: '/icon-dark-32x32.png', media: '(prefers-color-scheme: dark)' },
-      { url: '/icon.svg', type: 'image/svg+xml' },
-    ],
-    apple: '/apple-icon.png',
+    icon: [{ url: '/apple-icon.png', type: 'image/png' }],
+    shortcut: '/apple-icon.png',
+    apple: [{ url: '/apple-icon.png', type: 'image/png' }],
   },
+  manifest: '/site.webmanifest',
 }
 
 export const viewport: Viewport = {

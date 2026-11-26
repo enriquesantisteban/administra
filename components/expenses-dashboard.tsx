@@ -180,7 +180,7 @@ export function ExpensesDashboard({ user }: { user: { name: string; email: strin
   return <main className={`expense-app${mobileNavOpen?' nav-open':''}`} onTouchStart={event=>{touchStartX.current=event.touches[0]?.clientX??null}} onTouchEnd={event=>{const start=touchStartX.current;const end=event.changedTouches[0]?.clientX;touchStartX.current=null;if(start==null||end==null)return;if(start<30&&end-start>65)setMobileNavOpen(true);if(mobileNavOpen&&start-end>65)setMobileNavOpen(false)}}>
     {mobileNavOpen&&<button className="expense-nav-backdrop" aria-label="Close navigation" onClick={()=>setMobileNavOpen(false)}/>}
     <aside className={`expense-sidebar${mobileNavOpen?' sidebar-open':''}`} aria-label="Navegacion principal">
-      <a className="expense-brand" href="/dashboard"><span className="brand-mark">A</span>Administra<span>.</span></a>
+      <a className="expense-brand" href="/dashboard"><img src="/apple-icon.png" alt="Administra" className="expense-brand-logo" /></a>
       <div className="expense-sidebar-label">TU ESPACIO</div>
       <nav className="expense-side-nav">
         <button className={`expense-side-link${tab==='home'?' selected':''}`} onClick={()=>{setTab('home');setMobileNavOpen(false)}}><LayoutDashboard size={18}/><span>Inicio</span></button>
