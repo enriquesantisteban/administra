@@ -452,6 +452,68 @@ tbody tr:hover { background: #fbfcfa; }
 }
 @media(max-width:390px) { .expense-title { flex-wrap:wrap; } .expense-title-actions { width:100%; } .expense-title-actions button:last-child { margin-left:auto; } .expense-stats strong { font-size:21px; } .donut-chart { width:50%; } .expense-legend { gap:8px; } }
 
+/* Expenses workspace navigation and form polish */
+.expense-app { touch-action:pan-y; overscroll-behavior-x:contain; }
+.expense-sidebar { position:fixed; inset:0 auto 0 0; z-index:32; width:248px; display:flex; flex-direction:column; padding:26px 18px 18px; border-right:1px solid #e8ece7; background:#fff; }
+.expense-sidebar .expense-brand { width:fit-content; margin:0 8px 48px; color:#294d3b; }
+.expense-sidebar .expense-brand .brand-mark { color:#fff; background:#294d3b; }
+.expense-sidebar .expense-brand>span:last-child { color:#719875; }
+.expense-sidebar-label { margin:0 10px 11px; color:#a0a8a0; font-size:9px; font-weight:750; letter-spacing:1.2px; }
+.expense-side-nav { display:grid; gap:5px; }
+.expense-side-link { width:100%; min-height:45px; display:flex; align-items:center; gap:12px; padding:0 12px; border:0; border-radius:9px; color:#758078; background:transparent; text-align:left; font-size:12px; transition:background .16s,color .16s; }
+.expense-side-link:hover { color:#365b40; background:#f4f7f3; }
+.expense-side-link.selected { color:#315b3c; background:#edf3eb; font-weight:700; }
+.expense-side-link small { min-width:22px; margin-left:auto; padding:3px 6px; border-radius:20px; color:#728074; background:#fff; text-align:center; font-size:9px; }
+.expense-side-manage { min-height:41px; display:flex; align-items:center; gap:9px; margin-top:17px; padding:0 12px; border:1px dashed #d7e0d5; border-radius:9px; color:#45674b; background:#fafcf9; text-align:left; font-size:11px; }
+.expense-side-manage:hover { border-color:#9ab39b; background:#f1f6ef; }
+.expense-sidebar-footer { display:grid; gap:4px; margin-top:auto; padding:15px 11px 5px; border-top:1px solid #edf0ec; }
+.expense-sidebar-footer span { color:#a0a8a0; font-size:8px; font-weight:700; letter-spacing:1px; }
+.expense-sidebar-footer strong { color:#405746; font-family:Georgia,serif; font-size:21px; font-weight:500; }
+.expense-sidebar-footer small { color:#9aa198; font-size:9px; }
+.expense-main-column { min-width:0; min-height:100vh; margin-left:248px; }
+.expense-header { position:sticky; top:0; z-index:20; min-height:68px; justify-content:flex-end; gap:20px; border-bottom:1px solid #e9ede8; background:#ffffffed; color:#35473a; backdrop-filter:blur(12px); }
+.expense-header-title { margin-right:auto; color:#68766b; font-size:11px; font-weight:600; }
+.expense-mobile-menu { display:none; }
+.expense-user { color:#58665b; }
+.expense-user button { color:#647267; background:#f0f3ef; }
+.expense-wrap { width:min(1280px,100%); padding-top:31px; }
+.expense-title { margin-bottom:22px; }
+.expense-title-actions .button-quiet,.expense-filters .button-quiet { min-height:37px; padding:0 11px; border-color:#e5e9e3; background:#fff; }
+.expense-title-actions .button-primary { box-shadow:0 4px 12px #294d3b1c; }
+.expense-stats article,.expense-panel,.expense-list { box-shadow:0 2px 12px #243a2a08; }
+.expense-stats article { transition:transform .16s,box-shadow .16s; }
+.expense-stats article:hover { transform:translateY(-2px); box-shadow:0 7px 20px #243a2a0d; }
+.expense-total-preview { display:grid; gap:10px; margin:7px 0 19px; padding:17px 19px; border:1px solid #dce8dc; border-radius:11px; color:#46654b; background:#f0f6ee; }
+.expense-total-preview>div { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.expense-total-preview span { color:#748477; font-size:11px; }
+.expense-total-preview strong { color:#315b3c; font-size:14px; font-variant-numeric:tabular-nums; }
+.expense-total-preview .expense-preview-mine { margin-top:3px; padding-top:11px; border-top:1px solid #dce8dc; }
+.expense-total-preview .expense-preview-mine span,.expense-total-preview .expense-preview-mine strong { color:#245d34; font-weight:750; }
+.expense-total-preview.preview-error { border-color:#efcfca; color:#a54e43; background:#fff4f2; }
+.expense-total-preview.preview-error .expense-preview-mine strong { color:#a54e43; }
+.expense-total-preview>small { color:#a54e43; font-size:11px; }
+.expense-companion-picker { grid-column:1/-1; display:grid; gap:8px; min-width:0; margin:0; padding:13px 14px; border:1px solid #e6eae4; border-radius:9px; }
+.expense-companion-picker legend { padding:0 5px; color:#5e6c61; font-size:11px; font-weight:650; }
+.expense-companion-option { display:flex; align-items:center; justify-content:space-between; gap:13px; min-height:35px; }
+.expense-companion-option .field-check { min-height:30px; }
+.expense-contribution-field { grid-template-columns:auto 110px; align-items:center; gap:9px; color:#788179; font-size:10px; }
+.expense-contribution-field input { min-height:34px; }
+@media(max-width:760px) {
+  .expense-sidebar { width:min(302px,86vw); padding:23px 18px 17px; box-shadow:18px 0 46px #1b2b201a; transform:translateX(-105%); transition:transform .28s cubic-bezier(.22,.8,.25,1); }
+  .expense-sidebar.sidebar-open { transform:translateX(0); }
+  .expense-sidebar .expense-brand { margin-bottom:39px; }
+  .expense-main-column { margin-left:0; }
+  .expense-header { justify-content:flex-start; gap:8px; }
+  .expense-header-title { display:none; }
+  .expense-mobile-menu { width:36px; height:36px; display:grid; place-items:center; flex:0 0 auto; margin-left:-5px; border:0; border-radius:9px; color:#526657; background:#f0f3ef; }
+  .expense-mobile-menu:active { background:#e6eee4; }
+  .expense-nav-backdrop { position:fixed; inset:0; z-index:31; width:100%; border:0; background:#17241d82; backdrop-filter:blur(2px); animation:expense-fade-in .18s ease-out; }
+  .expense-wrap { padding-top:23px; }
+  .expense-total-preview { gap:11px; margin:8px 0 20px; padding:17px; }
+}
+@media(prefers-reduced-motion:reduce) { .expense-sidebar { transition:none; } .expense-nav-backdrop { animation:none; } }
+@keyframes expense-fade-in { from { opacity:0; } to { opacity:1; } }
+
 /* Mobile navigation follows Fiskal's drawer pattern; dashboard content reflows without zooming. */
 .mobile-menu, .mobile-nav-close { display: none; }
 @media (max-width: 760px) {

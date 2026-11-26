@@ -18,8 +18,8 @@ export async function GET(request: Request) {
     const rentRows = year ? await sql`SELECT * FROM alquiler WHERE anio=${year} ORDER BY mes` : []
     const expenseRows = year ? await sql`SELECT g.*, a.anio, a.mes FROM alquiler_gastos g JOIN alquiler a ON a.id=g.alquiler_id WHERE a.anio=${year} ORDER BY a.mes, g.id` : []
     const companions = year ? await sql`SELECT c.*, a.anio, a.mes FROM alquiler_companeros c JOIN alquiler a ON a.id=c.alquiler_id WHERE a.anio=${year} ORDER BY a.mes, c.id` : []
-    const expenseCompanions = year ? await sql`SELECT gc.gasto_id, c.id, c.nombre FROM alquiler_gasto_companeros gc JOIN companeros c ON c.id=gc.companero_id JOIN alquiler_gastos g ON g.id=gc.gasto_id JOIN alquiler a ON a.id=g.alquiler_id WHERE a.anio=${year} ORDER BY c.nombre` : []
-    const entries: Array<{ date: string; category: string; amount: string; shared: boolean; start: string; end: string; status: string; id: number; divider?: number; expenseDivider?: number; companions?: { id: number | null; name: string; contribution: string }[]; expenseCompanions?: { id: number; name: string }[] }> = []
+    const expenseCompanions = year ? await sql`SELECT gc.gasto_id, c.id, c.nombre, gc.aportacion FROM alquiler_gasto_companeros gc JOIN companeros c ON c.id=gc.companero_id JOIN alquiler_gastos g ON g.id=gc.gasto_id JOIN alquiler a ON a.id=g.alquiler_id WHERE a.anio=${year} ORDER BY c.nombre` : []
+    const entries: Array<{ date: string; category: string; amount: string; shared: boolean; start: string; end: string; status: string; id: number; divider?: number; expenseDivider?: number; companions?: { id: number | null; name: string; contribution: string }[]; expenseCompanions?: { id: number; name: string; contribution: string }[] }> = []
     for (const rent of rentRows) {
       const roommates = companions.filter(person => Number(person.alquiler_id) === Number(rent.id)).map(person => ({ id: person.companero_id == null ? null : Number(person.companero_id), name: String(person.nombre), contribution: String(person.aportacion_alquiler) }))
       entries.push({ id: -Number(rent.id), date: `${rent.anio}-${String(rent.mes).padStart(2, '0')}-01`, category: 'Alquiler', amount: String(rent.importe_alquiler), shared: false, start: '', end: '', status: rent.estado === 'pagado' ? 'Pagado' : 'Pendiente', divider: Number(rent.dividir_gastos_entre), companions: roommates })
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
       const date = `${expense.anio}-${String(expense.mes).padStart(2, '0')}-01`
       const parent = rentRows.find(rent => Number(rent.id) === Number(expense.alquiler_id))
       const roommates = companions.filter(person => Number(person.alquiler_id) === Number(expense.alquiler_id)).map(person => ({ id: person.companero_id == null ? null : Number(person.companero_id), name: String(person.nombre), contribution: String(person.aportacion_alquiler) }))
-      const selectedCompanions = expenseCompanions.filter(person => Number(person.gasto_id) === Number(expense.id)).map(person => ({ id: Number(person.id), name: String(person.nombre) }))
+      const selectedCompanions = expenseCompanions.filter(person => Number(person.gasto_id) === Number(expense.id)).map(person => ({ id: Number(person.id), name: String(person.nombre), contribution: String(person.aportacion ?? 0) }))
       entries.push({ id: Number(expense.id), date, category: String(expense.concepto), amount: String(expense.importe), shared: Boolean(expense.se_divide), start: expense.fecha ? String(expense.fecha).slice(0, 10) : '', end: expense.fecha_fin ? String(expense.fecha_fin).slice(0, 10) : '', status: parent?.estado === 'pagado' ? 'Pagado' : 'Pendiente', divider: Number(parent?.dividir_gastos_entre ?? 1), expenseDivider: Number(expense.dividir_entre ?? 1), companions: roommates, expenseCompanions: selectedCompanions })
     }
     const grouped: Record<string, Array<{ rowNumber: number; values: unknown[] }>> = {}
@@ -44,7 +44,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     await getSignedInUser()
-    const body = await request.json() as { action?: string; year?: string; rowNumber?: number; values?: unknown[]; status?: string; divider?: number; expenseDivider?: number; companions?: { id: number; name: string; contribution: number }[]; expenseCompanionIds?: number[] }
+    const body = await request.json() as { action?: string; year?: string; rowNumber?: number; values?: unknown[]; status?: string; divider?: number; expenseDivider?: number; companions?: { id: number; name: string; contribution: number }[]; expenseCompanions?: { id: number; contribution?: number }[] }
     const v = body.values ?? []
     if (!/^\d{4}$/.test(body.year ?? '') || !['add', 'update', 'delete', 'status'].includes(body.action ?? '')) return NextResponse.json({ error: 'Solicitud no válida' }, { status: 400 })
     if (body.action === 'delete') {
@@ -65,6 +65,10 @@ export async function POST(request: Request) {
     const amount = Number(String(rawAmount).replace(',', '.'))
     if (!validDate(date) || !categories.includes(String(category)) || !Number.isFinite(amount) || amount < 0) return NextResponse.json({ error: 'Fecha, categoría o importe no válido' }, { status: 400 })
     const [y, m] = String(date).split('-').map(Number)
+    const expenseCompanions = body.expenseCompanions ?? []
+    const expenseDivider = Math.max(1, Math.floor(Number(body.expenseDivider) || 1))
+    if (category === 'Internet' && expenseCompanions.reduce((sum, companion) => sum + Number(companion.contribution ?? 0), 0) > amount) return NextResponse.json({ error: 'La suma de las aportaciones de Internet no puede superar el importe total' }, { status: 400 })
+    if (['Luz', 'Agua'].includes(String(category)) && expenseCompanions.length > expenseDivider) return NextResponse.json({ error: 'El número de compañeros no puede superar el divisor' }, { status: 400 })
     let rentalId: number
     if (category === 'Alquiler') {
       const result = body.action === 'update'
@@ -82,7 +86,6 @@ export async function POST(request: Request) {
     } else {
       const base = await sql`INSERT INTO alquiler (anio, mes) VALUES (${y}, ${m}) ON CONFLICT (anio, mes) DO UPDATE SET mes=EXCLUDED.mes RETURNING id`
       rentalId = Number(base[0].id)
-      const expenseDivider = Math.max(1, Math.floor(Number(body.expenseDivider) || 1))
       let expenseId: number
       if (body.action === 'update') {
         const updated = await sql`UPDATE alquiler_gastos SET concepto=${String(category)}, importe=${amount}, fecha=${start ? String(start) : null}, fecha_fin=${end ? String(end) : null}, se_divide=${Boolean(shared)}, dividir_entre=${expenseDivider} WHERE id=${body.rowNumber} AND alquiler_id=${rentalId} RETURNING id`
@@ -93,8 +96,10 @@ export async function POST(request: Request) {
         expenseId = Number(created[0].id)
       }
       await sql`DELETE FROM alquiler_gasto_companeros WHERE gasto_id=${expenseId}`
-      for (const companionId of [...new Set(body.expenseCompanionIds ?? [])]) {
-        if (Number.isInteger(companionId) && companionId > 0) await sql`INSERT INTO alquiler_gasto_companeros (gasto_id, companero_id) SELECT ${expenseId}, id FROM companeros WHERE id=${companionId} AND activo=TRUE ON CONFLICT DO NOTHING`
+      for (const companion of [...new Map(expenseCompanions.map(item => [Number(item.id), item])).values()]) {
+        const companionId = Number(companion.id)
+        const contribution = Number(companion.contribution ?? 0)
+        if (Number.isInteger(companionId) && companionId > 0 && Number.isFinite(contribution) && contribution >= 0) await sql`INSERT INTO alquiler_gasto_companeros (gasto_id, companero_id, aportacion) SELECT ${expenseId}, id, ${contribution} FROM companeros WHERE id=${companionId} AND activo=TRUE ON CONFLICT (gasto_id, companero_id) DO UPDATE SET aportacion=EXCLUDED.aportacion`
       }
     }
     return NextResponse.json({ ok: true, rentalId })

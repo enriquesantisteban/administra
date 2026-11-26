@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     const rentRows = await sql`SELECT * FROM alquiler ORDER BY anio, mes`
     const expenseRows = await sql`SELECT g.*, a.anio, a.mes FROM alquiler_gastos g JOIN alquiler a ON a.id=g.alquiler_id ORDER BY a.anio, a.mes, g.id`
     const companionRows = await sql`SELECT c.*, a.anio, a.mes FROM alquiler_companeros c JOIN alquiler a ON a.id=c.alquiler_id ORDER BY a.anio, a.mes, c.id`
-    const expenseCompanionRows = await sql`SELECT gc.gasto_id, c.id AS companero_id FROM alquiler_gasto_companeros gc JOIN companeros c ON c.id=gc.companero_id`
+    const expenseCompanionRows = await sql`SELECT gc.gasto_id, c.id AS companero_id, gc.aportacion FROM alquiler_gasto_companeros gc JOIN companeros c ON c.id=gc.companero_id`
     const yearsInData = [...new Set(rentRows.map(row => Number(row.anio)))].sort((a,b)=>a-b)
     const years = selected === 'all' ? [...new Set([...Array.from({length: Math.max(0, (yearsInData.at(-1) ?? new Date().getFullYear()) - 2016)}, (_,i)=>2017+i), ...yearsInData])] : [Number(selected)]
     if (years.some(y => !Number.isInteger(y) || y < 2017 || y > 9999)) return NextResponse.json({ error: 'Año no válido' }, { status: 400 })
@@ -49,7 +49,17 @@ export async function GET(request: Request) {
           const to = format(end)
           return from && to ? `${from} - ${to}` : from || to
         }
-        const sharedTotal = monthExpenses.filter(row => row.se_divide && String(row.concepto).toLocaleLowerCase('es') !== 'compras').reduce((sum,row)=>sum+amount(row.importe)/Math.max(1, Number(row.dividir_entre ?? rent?.dividir_gastos_entre ?? 1)),0)
+        const sharedTotal = monthExpenses.filter(row => row.se_divide && String(row.concepto).toLocaleLowerCase('es') !== 'compras').reduce((sum,row)=>{
+          const category = String(row.concepto).toLocaleLowerCase('es')
+          const assigned = expenseCompanionRows.filter(item => Number(item.gasto_id) === Number(row.id))
+          if (category === 'internet') return sum + Math.max(0, amount(row.importe) - assigned.reduce((total,item)=>total+amount(item.aportacion),0))
+          if (category === 'luz' || category === 'agua') {
+            const expenseCents = Math.round(amount(row.importe) * 100)
+            const share = Math.floor(expenseCents / Math.max(1, Number(row.dividir_entre ?? rent?.dividir_gastos_entre ?? 1)))
+            return sum + Math.max(0, expenseCents - share * assigned.length) / 100
+          }
+          return sum + amount(row.importe)/Math.max(1, Number(row.dividir_entre ?? rent?.dividir_gastos_entre ?? 1))
+        },0)
         const rentAmount = amount(rent?.importe_alquiler)
         const contribution = people.reduce((sum,row)=>sum+amount(row.aportacion_alquiler),0)
         const totalRent = rentAmount - contribution - sharedTotal
@@ -63,7 +73,13 @@ export async function GET(request: Request) {
         for (const name of names) {
           const roommate = people.find(person => String(person.nombre) === name)
           record[`CON ${name.toLocaleUpperCase('es')}`] = roommate ? 'Sí' : 'No'
-          const assignedGross = monthExpenses.filter(expense => expense.se_divide && expenseCompanionRows.some(item => Number(item.gasto_id) === Number(expense.id) && Number(item.companero_id) === Number(roommate?.companero_id))).reduce((sum, expense) => sum + amount(expense.importe), 0)
+          const assignedGross = monthExpenses.filter(expense => expense.se_divide && expenseCompanionRows.some(item => Number(item.gasto_id) === Number(expense.id) && Number(item.companero_id) === Number(roommate?.companero_id))).reduce((sum, expense) => {
+            const assignment = expenseCompanionRows.find(item => Number(item.gasto_id) === Number(expense.id) && Number(item.companero_id) === Number(roommate?.companero_id))
+            const category = String(expense.concepto).toLocaleLowerCase('es')
+            if (category === 'internet') return sum + amount(assignment?.aportacion)
+            if (category === 'luz' || category === 'agua') return sum + Math.floor(Math.round(amount(expense.importe) * 100) / Math.max(1, Number(expense.dividir_entre ?? rent?.dividir_gastos_entre ?? 1))) / 100
+            return sum + amount(expense.importe)
+          }, 0)
           record[`TOTAL ALQUILER CON ${name.toLocaleUpperCase('es')}`] = roommate ? rentAmount + assignedGross : 0
         }
         rows.push(headers.map(header => record[header] ?? ''))
