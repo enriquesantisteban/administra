@@ -588,3 +588,16 @@ tbody tr:hover { background: #fbfcfa; }
   .search-box { flex: 1 1 100%; min-height: 36px; }
   .footer-sheet { font-size: 8px; }
 }
+
+.expense-download-menu { position:relative; flex:0 0 auto; }
+.expense-download-popover { position:absolute; top:calc(100% + 8px); right:0; z-index:40; width:188px; display:grid; gap:4px; padding:6px; border:1px solid #e5eae3; border-radius:10px; background:#fff; box-shadow:0 12px 32px #1f33241c; animation:expense-fade-in .14s ease-out; }
+.expense-download-popover button { min-height:38px; padding:0 10px; border:0; border-radius:7px; color:#526254; background:#fff; text-align:left; font-size:11px; }
+.expense-download-popover button:hover { color:#315b3c; background:#f1f5ef; }
+.expense-download-popover button:disabled { opacity:.55; }
+@media(max-width:760px) {
+  .expense-filters { gap:7px; }
+  .expense-filters label { min-width:0; flex:1 1 70px; }
+  .expense-filters select { min-width:0; padding-right:19px; }
+  .expense-filters .expense-download-menu { flex:0 0 auto; }
+  .expense-filters .expense-download-menu>button { padding:0 9px; }
+}
