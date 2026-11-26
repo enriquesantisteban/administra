@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+﻿import { NextResponse } from 'next/server'
 import { sql } from '@/lib/neon'
 import { getSignedInUser } from '@/lib/session'
 
@@ -44,15 +44,16 @@ export async function POST(request: Request) {
     await getSignedInUser()
     const body = await request.json() as { action?: string; year?: string; rowNumber?: number; values?: unknown[]; status?: string; divider?: number; companions?: { name: string; contribution: number }[] }
     const v = body.values ?? []
-    if (!/^\d{4}$/.test(body.year ?? '') || !['add', 'update', 'delete', 'status'].includes(body.action ?? '')) return NextResponse.json({ error: 'Solicitud no válida' }, { status: 400 })
+    if (!/^\d{4}$/.test(body.year ?? '') || !['add', 'update', 'delete', 'status'].includes(body.action ?? '')) return NextResponse.json({ error: 'Solicitud no vÃ¡lida' }, { status: 400 })
     if (body.action === 'delete') {
-      if (!Number.isInteger(body.rowNumber)) return NextResponse.json({ error: 'Registro no válido' }, { status: 400 })
-      if (body.rowNumber < 0) await sql`DELETE FROM alquiler WHERE id=${-body.rowNumber} RETURNING id`
-      else await sql`DELETE FROM alquiler_gastos WHERE id=${body.rowNumber} RETURNING id`
+      const rowNumber = Number(body.rowNumber)
+      if (!Number.isInteger(rowNumber) || rowNumber === 0) return NextResponse.json({ error: 'Registro no vÃ¡lido' }, { status: 400 })
+      if (rowNumber < 0) await sql`DELETE FROM alquiler WHERE id=${-rowNumber} RETURNING id`
+      else await sql`DELETE FROM alquiler_gastos WHERE id=${rowNumber} RETURNING id`
       return NextResponse.json({ ok: true })
     }
     if (body.action === 'status') {
-      if (!['Pagado', 'Pendiente'].includes(body.status ?? '')) return NextResponse.json({ error: 'Estado no válido' }, { status: 400 })
+      if (!['Pagado', 'Pendiente'].includes(body.status ?? '')) return NextResponse.json({ error: 'Estado no vÃ¡lido' }, { status: 400 })
       const expense = body.rowNumber && body.rowNumber > 0 ? await sql`SELECT alquiler_id FROM alquiler_gastos WHERE id=${body.rowNumber}` : []
       const rentalId = expense.length ? expense[0].alquiler_id : Math.abs(body.rowNumber ?? 0)
       await sql`UPDATE alquiler SET estado=${body.status === 'Pagado' ? 'pagado' : 'pendiente'} WHERE id=${rentalId}`
@@ -60,14 +61,14 @@ export async function POST(request: Request) {
     }
     const [date, category, rawAmount, shared, start, end, status] = v
     const amount = Number(String(rawAmount).replace(',', '.'))
-    if (!validDate(date) || !categories.includes(String(category)) || !Number.isFinite(amount) || amount < 0) return NextResponse.json({ error: 'Fecha, categoría o importe no válido' }, { status: 400 })
+    if (!validDate(date) || !categories.includes(String(category)) || !Number.isFinite(amount) || amount < 0) return NextResponse.json({ error: 'Fecha, categorÃ­a o importe no vÃ¡lido' }, { status: 400 })
     const [y, m] = String(date).split('-').map(Number)
     let rentalId: number
     if (category === 'Alquiler') {
       const result = body.action === 'update'
         ? await sql`UPDATE alquiler SET importe_alquiler=${amount}, estado=${status === 'Pagado' ? 'pagado' : 'pendiente'}, dividir_gastos_entre=${Math.max(1, Math.floor(Number(body.divider) || 1))} WHERE id=${Math.abs(body.rowNumber ?? 0)} AND anio=${y} RETURNING id`
         : await sql`INSERT INTO alquiler (anio, mes, importe_alquiler, estado) VALUES (${y}, ${m}, ${amount}, ${status === 'Pagado' ? 'pagado' : 'pendiente'}) ON CONFLICT (anio, mes) DO UPDATE SET importe_alquiler=EXCLUDED.importe_alquiler, estado=EXCLUDED.estado RETURNING id`
-      if (!result.length) return NextResponse.json({ error: 'No se encontró el alquiler' }, { status: 404 })
+      if (!result.length) return NextResponse.json({ error: 'No se encontrÃ³ el alquiler' }, { status: 404 })
       rentalId = Number(result[0].id)
       if (body.action === 'add') await sql`UPDATE alquiler SET dividir_gastos_entre=${Math.max(1, Math.floor(Number(body.divider) || 1))} WHERE id=${rentalId}`
       await sql`DELETE FROM alquiler_companeros WHERE alquiler_id=${rentalId}`
@@ -85,3 +86,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, rentalId })
   } catch (error) { return responseError(error) }
 }
+
