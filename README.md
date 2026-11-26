@@ -1,25 +1,19 @@
-# administra
+# Administra
 
-Panel privado de alquileres conectado a Google Sheets. La autenticación usa Google OAuth y sesiones seguras en cookies; no necesita una base de datos.
+Panel privado para gestionar alquileres y gastos. La autenticación continúa con Google OAuth y los datos se guardan en Neon.
 
-## Variables de entorno
+## Variables de entorno en Vercel
 
-Configura estas variables en Vercel:
+- `DATABASE_URL`: URL de conexión de Neon. La integración de Neon suele añadir esta variable automáticamente.
+- `BETTER_AUTH_SECRET`: secreto de Better Auth.
+- `BETTER_AUTH_URL`: URL pública de la aplicación.
+- `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`: inicio de sesión con Google.
+- `AUTHORIZED_EMAIL` (opcional): restringe el acceso a una cuenta.
 
-- `BETTER_AUTH_SECRET` (preferida) o `AUTH_SECRET`: clave secreta no vacía para firmar las sesiones.
-- `BETTER_AUTH_URL`: URL pública de la aplicación, por ejemplo `https://administra-tau.vercel.app`.
-- `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`: credenciales OAuth de Google.
-- `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` y `GOOGLE_SHEET_ID`: acceso de servidor a la hoja. `GOOGLE_SHEET_ID` puede ser el ID o el enlace de Google Sheets.
-- `AUTHORIZED_EMAIL` (opcional): limita el acceso a una cuenta Google concreta.
+`AUTH_SECRET` sirve como alternativa si no está configurado `BETTER_AUTH_SECRET`. Ya no se necesitan `GOOGLE_SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_EMAIL` ni `GOOGLE_PRIVATE_KEY`.
 
-En Google Cloud, configura como URI de redirección autorizada:
+Las tablas Neon usadas por la aplicación son `alquiler`, `alquiler_gastos` y `alquiler_companeros`. Al añadir un alquiler puedes elegir el divisor de gastos y escribir compañeros y aportaciones con el formato `Nombre:importe, Nombre:importe`. Los gastos marcados para dividir se reparten entre el divisor elegido; las compras se representan aparte como importe compartido.
 
-`https://administra-tau.vercel.app/api/auth/callback/google`
+Ejecuta una vez la migración `database/migrations/20261126_add_gasto_fecha_fin.sql` en Neon para guardar también la fecha final de los periodos de luz y agua.
 
-Después de añadir o cambiar variables en Vercel, vuelve a desplegar la aplicación.
-
-## Formato de las hojas
-
-Se leen pestañas cuyo nombre sea un año (por ejemplo, `2017`) o `Alquiler_2017`. La fila de cabeceras se detecta automáticamente buscando `MESES`, `ALQUILER` y `TOTAL`; puede empezar en una columna distinta de A. Las columnas adicionales de 2026, como `CON ÁNGEL` y `A MEDIAS`, se muestran según aparezcan en la hoja.
-
-Desde el histórico se puede crear el año siguiente y elegir qué año usar como plantilla. La pestaña nueva se llama `YYYY`, se coloca al final y su tabla se llama `Alquiler_YYYY`. Conserva el formato, pero empieza sin filas de datos; los registros y meses se añaden con «Nuevo». Los campos vacíos se guardan como `-` y los importes calculados los interpretan como cero. El estado de pago se guarda en este navegador y solo se muestra en la web. También se puede eliminar el año seleccionado, pero siempre debe quedar al menos una hoja anual. `TOTAL ALQUILER CON ÁNGEL` suma los gastos base; `TOTAL ALQUILER` aplica el reparto de Ángel cuando está marcado y, si no, suma esos gastos sin reparto.
+La exportación genera un archivo XLSX con una pestaña por año. Desde el panel se puede descargar el año seleccionado o todo el histórico.
