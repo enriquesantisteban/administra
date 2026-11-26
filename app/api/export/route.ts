@@ -14,6 +14,7 @@ export async function GET(request: Request) {
     const rentRows = await sql`SELECT * FROM alquiler ORDER BY anio, mes`
     const expenseRows = await sql`SELECT g.*, a.anio, a.mes FROM alquiler_gastos g JOIN alquiler a ON a.id=g.alquiler_id ORDER BY a.anio, a.mes, g.id`
     const companionRows = await sql`SELECT c.*, a.anio, a.mes FROM alquiler_companeros c JOIN alquiler a ON a.id=c.alquiler_id ORDER BY a.anio, a.mes, c.id`
+    const expenseCompanionRows = await sql`SELECT gc.gasto_id, c.id AS companero_id FROM alquiler_gasto_companeros gc JOIN companeros c ON c.id=gc.companero_id`
     const yearsInData = [...new Set(rentRows.map(row => Number(row.anio)))].sort((a,b)=>a-b)
     const years = selected === 'all' ? [...new Set([...Array.from({length: Math.max(0, (yearsInData.at(-1) ?? new Date().getFullYear()) - 2016)}, (_,i)=>2017+i), ...yearsInData])] : [Number(selected)]
     if (years.some(y => !Number.isInteger(y) || y < 2017 || y > 9999)) return NextResponse.json({ error: 'Año no válido' }, { status: 400 })
@@ -49,9 +50,7 @@ export async function GET(request: Request) {
           return from && to ? `${from} - ${to}` : from || to
         }
         const sharedTotal = monthExpenses.filter(row => row.se_divide && String(row.concepto).toLocaleLowerCase('es') !== 'compras').reduce((sum,row)=>sum+amount(row.importe)/Math.max(1, Number(row.dividir_entre ?? rent?.dividir_gastos_entre ?? 1)),0)
-        const sharedGross = monthExpenses.filter(row => row.se_divide && String(row.concepto).toLocaleLowerCase('es') !== 'compras').reduce((sum,row)=>sum+amount(row.importe),0)
         const rentAmount = amount(rent?.importe_alquiler)
-        const divisor = Math.max(1, Number(rent?.dividir_gastos_entre ?? 1))
         const contribution = people.reduce((sum,row)=>sum+amount(row.aportacion_alquiler),0)
         const totalRent = rentAmount - contribution - sharedTotal
         const purchase = byCategory('Compras')
@@ -64,7 +63,8 @@ export async function GET(request: Request) {
         for (const name of names) {
           const roommate = people.find(person => String(person.nombre) === name)
           record[`CON ${name.toLocaleUpperCase('es')}`] = roommate ? 'Sí' : 'No'
-          record[`TOTAL ALQUILER CON ${name.toLocaleUpperCase('es')}`] = roommate ? rentAmount + sharedGross : 0
+          const assignedGross = monthExpenses.filter(expense => expense.se_divide && expenseCompanionRows.some(item => Number(item.gasto_id) === Number(expense.id) && Number(item.companero_id) === Number(roommate?.companero_id))).reduce((sum, expense) => sum + amount(expense.importe), 0)
+          record[`TOTAL ALQUILER CON ${name.toLocaleUpperCase('es')}`] = roommate ? rentAmount + assignedGross : 0
         }
         rows.push(headers.map(header => record[header] ?? ''))
       }
